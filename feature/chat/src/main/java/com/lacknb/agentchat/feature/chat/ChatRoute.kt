@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -103,6 +105,7 @@ import kotlinx.coroutines.Dispatchers
 fun ChatRoute(
     providerSettings: ProviderSettings,
     onOpenSettings: () -> Unit,
+    onOpenPrompts: () -> Unit,
     onSendMessage: suspend (
         messages: List<ChatMessage>,
         onDelta: (String) -> Unit,
@@ -394,11 +397,34 @@ fun ChatRoute(
                     onClick = {
                         scope.launch { drawerState.close() }
                     },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Filled.Message,
+                            contentDescription = "智能对话",
+                        )
+                    },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
                     colors = NavigationDrawerItemDefaults.colors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                         selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
+                )
+
+                NavigationDrawerItem(
+                    label = { Text("提示词管理", fontWeight = FontWeight.Medium) },
+                    selected = false,
+                    onClick = {
+                        scope.launch { drawerState.close() }
+                        onOpenPrompts()
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Filled.Description,
+                            contentDescription = "提示词管理",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
 
                 Row(
@@ -408,11 +434,22 @@ fun ChatRoute(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "内部知识库",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Storage,
+                            contentDescription = "内部知识库",
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                        )
+                        Text(
+                            text = "内部知识库",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
@@ -434,11 +471,22 @@ fun ChatRoute(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "工具中心",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Build,
+                            contentDescription = "工具中心",
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                        )
+                        Text(
+                            text = "工具中心",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))

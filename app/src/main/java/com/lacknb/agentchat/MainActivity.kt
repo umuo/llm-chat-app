@@ -38,12 +38,16 @@ import com.lacknb.agentchat.core.network.ChatCompletionToolCall
 import com.lacknb.agentchat.core.network.ChatCompletionToolCallFunction
 import com.lacknb.agentchat.core.network.ChatCompletionsClient
 import com.lacknb.agentchat.core.network.OpenAiChatCompletionsClient
+import com.lacknb.agentchat.core.prompts.ManagedPrompt
+import com.lacknb.agentchat.core.prompts.PromptRepository
 import com.lacknb.agentchat.core.provider.ProviderRepository
 import com.lacknb.agentchat.feature.chat.ChatRoute
+import com.lacknb.agentchat.feature.prompts.PromptManagementRoute
 import com.lacknb.agentchat.feature.settings.SettingsRoute
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -52,6 +56,7 @@ class MainActivity : ComponentActivity() {
         setTheme(R.style.Theme_AgentChat)
         super.onCreate(savedInstanceState)
         val providerRepository = ProviderRepository(applicationContext)
+        val promptRepository = PromptRepository(applicationContext)
         val chatClient = OpenAiChatCompletionsClient()
         val agentWorkspace = File(applicationContext.filesDir, "agent_workspace")
 
@@ -69,6 +74,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     AgentChatApp(
                         providerRepository = providerRepository,
+                        promptRepository = promptRepository,
                         chatClient = chatClient,
                         agentWorkspace = agentWorkspace,
                     )
@@ -97,6 +103,7 @@ private fun StartupSplashImage() {
 @Composable
 private fun AgentChatApp(
     providerRepository: ProviderRepository,
+    promptRepository: PromptRepository,
     chatClient: ChatCompletionsClient,
     agentWorkspace: File,
 ) {
@@ -111,6 +118,7 @@ private fun AgentChatApp(
             ChatRoute(
                 providerSettings = providerSettings,
                 onOpenSettings = { navController.navigate(TopLevelDestination.Settings.route) },
+                onOpenPrompts = { navController.navigate(TopLevelDestination.Prompts.route) },
                 onSendMessage = { messages, onDelta, onToolCallDelta ->
                     streamChatCompletion(
                         providerRepository = providerRepository,
@@ -123,6 +131,7 @@ private fun AgentChatApp(
                 onRunAgent = { goal, history, onEvent, onDelta, onToolCallDelta ->
                     runAgentChatCompletion(
                         providerRepository = providerRepository,
+                        promptRepository = promptRepository,
                         chatClient = chatClient,
                         agentWorkspace = agentWorkspace,
                         goal = goal,
@@ -147,11 +156,18 @@ private fun AgentChatApp(
                 },
             )
         }
+        composable(TopLevelDestination.Prompts.route) {
+            PromptManagementRoute(
+                repository = promptRepository,
+                onBackToChat = { navController.popBackStack() },
+            )
+        }
     }
 }
 
 private suspend fun runAgentChatCompletion(
     providerRepository: ProviderRepository,
+    promptRepository: PromptRepository,
     chatClient: ChatCompletionsClient,
     agentWorkspace: File,
     goal: String,
@@ -285,6 +301,7 @@ private suspend fun runAgentChatCompletion(
                 apiKey = apiKey,
                 chatClient = chatClient,
                 agentWorkspace = agentWorkspace,
+                promptRepository = promptRepository,
             )
 
             emitEvent(
@@ -332,6 +349,7 @@ private suspend fun executeAgentTool(
     apiKey: String,
     chatClient: ChatCompletionsClient,
     agentWorkspace: File,
+    promptRepository: PromptRepository,
 ): String {
     val args = parseToolArguments(argumentsJson)
     return runCatching {
@@ -390,6 +408,7 @@ private suspend fun executeAgentTool(
                     .put("sensitivity", args.optString("sensitivity"))
                     .toString()
             }
+            "manage_prompts" -> executePromptTool(args, promptRepository)
             else -> {
                 JSONObject()
                     .put("ok", false)
@@ -403,6 +422,121 @@ private suspend fun executeAgentTool(
             .put("error", error.message ?: "工具执行失败")
             .toString()
     }
+}
+
+private fun executePromptTool(args: JSONObject, promptRepository: PromptRepository): String {
+    return when (val action = args.optString("action", "list")) {
+        "list" -> {
+            val category = args.optStringOrNull("category")
+            val query = args.optStringOrNull("query")?.lowercase()
+            val prompts = promptRepository.prompts.value
+                .filter { prompt -> category == null || prompt.category == category }
+                .filter { prompt ->
+                    query == null ||
+                        prompt.title.lowercase().contains(query) ||
+                        prompt.content.lowercase().contains(query) ||
+                        prompt.category.lowercase().contains(query)
+                }
+            JSONObject()
+                .put("ok", true)
+                .put("action", action)
+                .put("prompts", JSONArray().apply { prompts.forEach { put(it.toToolJson(includeContent = true)) } })
+                .toString()
+        }
+        "categories" -> JSONObject()
+            .put("ok", true)
+            .put("action", action)
+            .put("categories", JSONArray().apply { promptRepository.categories().forEach { put(it) } })
+            .toString()
+        "create" -> {
+            val prompt = promptRepository.createPrompt(
+                title = args.optString("title"),
+                content = args.getString("content"),
+                category = args.optString("category"),
+            )
+            JSONObject()
+                .put("ok", true)
+                .put("action", action)
+                .put("prompt", prompt.toToolJson(includeContent = true))
+                .toString()
+        }
+        "update" -> {
+            val target = resolvePromptTarget(promptRepository, args)
+            val prompt = promptRepository.updatePrompt(
+                id = target.id,
+                title = args.optStringOrNull("title"),
+                content = args.optStringOrNull("content"),
+                category = args.optStringOrNull("category"),
+            )
+            JSONObject()
+                .put("ok", true)
+                .put("action", action)
+                .put("prompt", prompt.toToolJson(includeContent = true))
+                .toString()
+        }
+        "delete" -> {
+            val target = resolvePromptTarget(promptRepository, args)
+            val deleted = promptRepository.deletePrompt(target.id)
+            JSONObject()
+                .put("ok", deleted)
+                .put("action", action)
+                .put("deleted_id", target.id)
+                .toString()
+        }
+        "export_json" -> JSONObject()
+            .put("ok", true)
+            .put("action", action)
+            .put("json", promptRepository.exportToJson(args.optStringOrNull("category")))
+            .toString()
+        "import_json" -> {
+            val imported = promptRepository.importFromJson(
+                json = args.getString("json"),
+                replaceExisting = args.optBoolean("replace_existing", false),
+            )
+            JSONObject()
+                .put("ok", true)
+                .put("action", action)
+                .put("imported_count", imported.size)
+                .put("prompts", JSONArray().apply { imported.forEach { put(it.toToolJson(includeContent = false)) } })
+                .toString()
+        }
+        else -> JSONObject()
+            .put("ok", false)
+            .put("error", "未知提示词操作：$action")
+            .toString()
+    }
+}
+
+private fun resolvePromptTarget(
+    promptRepository: PromptRepository,
+    args: JSONObject,
+): ManagedPrompt {
+    args.optStringOrNull("id")?.let { id ->
+        promptRepository.findById(id)?.let { return it }
+        error("提示词不存在：$id")
+    }
+    val title = args.optStringOrNull("title")
+        ?: args.optStringOrNull("match_title")
+        ?: error("需要提供 id 或 title/match_title")
+    val matches = promptRepository.prompts.value.filter { it.title == title }
+    require(matches.isNotEmpty()) { "未找到标题为「$title」的提示词" }
+    require(matches.size == 1) { "标题「$title」匹配到多条提示词，请改用 id" }
+    return matches.first()
+}
+
+private fun ManagedPrompt.toToolJson(includeContent: Boolean): JSONObject {
+    return JSONObject()
+        .put("id", id)
+        .put("title", title)
+        .put("category", category)
+        .put("updated_at_millis", updatedAtMillis)
+        .apply {
+            if (includeContent) put("content", content)
+        }
+}
+
+private fun JSONObject.optStringOrNull(name: String): String? {
+    return if (has(name) && !isNull(name)) optString(name).trim().takeIf { it.isNotBlank() } else null
 }
 
 private suspend fun runPlanningSubAgent(
@@ -544,6 +678,7 @@ private fun buildAgentMessages(
     val systemPrompt = """
         你是运行在智能体（Agent）模式下的 AgentChat。
         你可以通过调用可用的工具来协助用户完成任务。
+        如果用户要求新增、查询、修改、删除、分类、导入或导出提示词，请使用 manage_prompts 工具操作本机提示词库。
         如果需要使用工具，请直接进行工具调用。
         如果不需要使用工具，或者在获得工具返回的结果后，请直接给出最终的回答。
         请务必使用中文进行回复。
@@ -658,6 +793,32 @@ private fun agentTools(): List<ChatCompletionTool> {
                 """.trimIndent(),
             ),
         ),
+        ChatCompletionTool(
+            function = ChatCompletionFunction(
+                name = "manage_prompts",
+                description = "管理本机提示词库。支持查询列表、分类、新增、修改、删除、导出 JSON、从 JSON 导入提示词。",
+                parametersJson = """
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": ["list", "categories", "create", "update", "delete", "export_json", "import_json"]
+                        },
+                        "id": {"type": "string", "description": "提示词 id。修改或删除时优先使用。"},
+                        "title": {"type": "string", "description": "提示词标题；也可用于按精确标题定位。"},
+                        "match_title": {"type": "string", "description": "当 title 要作为新标题时，用此字段按旧标题定位。"},
+                        "content": {"type": "string", "description": "提示词内容。新增时必填，修改时可选。"},
+                        "category": {"type": "string", "description": "提示词分类，查询或导出时可作为筛选条件。"},
+                        "query": {"type": "string", "description": "列表查询关键词，会匹配标题、内容和分类。"},
+                        "json": {"type": "string", "description": "导入时提供的提示词 JSON。"},
+                        "replace_existing": {"type": "boolean", "description": "导入时是否替换现有提示词。默认 false。"}
+                      },
+                      "required": ["action"]
+                    }
+                """.trimIndent(),
+            ),
+        ),
     )
 }
 
@@ -709,5 +870,6 @@ private fun MessageRole.toChatCompletionRole(): String {
 
 private enum class TopLevelDestination(val route: String) {
     Chat(route = "chat"),
+    Prompts(route = "prompts"),
     Settings(route = "settings"),
 }
