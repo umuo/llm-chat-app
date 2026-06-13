@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -34,9 +35,16 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -95,6 +103,12 @@ fun ChatRoute(
         onToolCallDelta: (ChatToolCall) -> Unit,
     ) -> Result<Unit>,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val historyManager = remember { ConversationHistoryManager(context) }
+    var currentConversationId by rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var showHistoryDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var historySummaries by remember { androidx.compose.runtime.mutableStateOf(historyManager.getSummaries()) }
+
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val agentEventsByMessage = remember { mutableStateMapOf<String, List<AgentEvent>>() }
@@ -150,6 +164,13 @@ fun ChatRoute(
                 )
             }
         }
+        val savedId = historyManager.saveConversation(
+            currentConversationId,
+            selectedMode,
+            messages.toList(),
+            agentEventsByMessage.toMap()
+        )
+        currentConversationId = savedId
     }
 
     fun resetConversation() {
@@ -158,6 +179,7 @@ fun ChatRoute(
         isSending = false
         messages.clear()
         agentEventsByMessage.clear()
+        currentConversationId = null
     }
 
     fun sendMessage() {
@@ -178,6 +200,14 @@ fun ChatRoute(
         )
         input = ""
         isSending = true
+
+        val savedId = historyManager.saveConversation(
+            currentConversationId,
+            selectedMode,
+            messages.toList(),
+            agentEventsByMessage.toMap()
+        )
+        currentConversationId = savedId
 
         currentJob = scope.launch {
             val result = if (selectedMode == ChatMode.Chat) {
@@ -234,6 +264,14 @@ fun ChatRoute(
             }
             isSending = false
             currentJob = null
+
+            val finalSavedId = historyManager.saveConversation(
+                currentConversationId,
+                selectedMode,
+                messages.toList(),
+                agentEventsByMessage.toMap()
+            )
+            currentConversationId = finalSavedId
         }
     }
 
@@ -381,6 +419,10 @@ fun ChatRoute(
                         scope.launch {
                             drawerState.open()
                         }
+                    },
+                    onOpenHistory = {
+                        historySummaries = historyManager.getSummaries()
+                        showHistoryDialog = true
                     }
                 )
             },
@@ -431,6 +473,35 @@ fun ChatRoute(
             }
         }
     }
+
+    if (showHistoryDialog) {
+        HistoryDialog(
+            summaries = historySummaries,
+            currentConversationId = currentConversationId,
+            onClose = { showHistoryDialog = false },
+            onSelect = { summary ->
+                showHistoryDialog = false
+                val detail = historyManager.loadConversation(summary.id)
+                if (detail != null) {
+                    messages.clear()
+                    messages.addAll(detail.messages)
+                    agentEventsByMessage.clear()
+                    agentEventsByMessage.putAll(detail.agentEvents)
+                    selectedMode = detail.selectedMode
+                    currentConversationId = detail.id
+                    shouldAutoScroll = true
+                }
+            },
+            onDelete = { summary ->
+                historyManager.deleteConversation(summary.id)
+                historySummaries = historyManager.getSummaries()
+                if (currentConversationId == summary.id) {
+                    resetConversation()
+                    currentConversationId = null
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -441,6 +512,7 @@ private fun ConversationTopBar(
     onOpenSettings: () -> Unit,
     onResetConversation: () -> Unit,
     onOpenDrawer: () -> Unit,
+    onOpenHistory: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -480,6 +552,13 @@ private fun ConversationTopBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            IconButton(onClick = onOpenHistory) {
+                Icon(
+                    imageVector = Icons.Filled.History,
+                    contentDescription = "历史对话",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
             Box(
                 modifier = Modifier
@@ -1060,6 +1139,153 @@ private fun ThinkingIndicator(
                     .size(8.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = animatable.value)),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryDialog(
+    summaries: List<ConversationSummary>,
+    currentConversationId: String?,
+    onClose: () -> Unit,
+    onSelect: (ConversationSummary) -> Unit,
+    onDelete: (ConversationSummary) -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 500.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "历史对话",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "关闭",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                if (summaries.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "暂无历史对话记录",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(summaries, key = { it.id }) { summary ->
+                            HistoryItem(
+                                summary = summary,
+                                isCurrent = summary.id == currentConversationId,
+                                onSelect = { onSelect(summary) },
+                                onDelete = { onDelete(summary) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryItem(
+    summary: ConversationSummary,
+    isCurrent: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val dateString = remember(summary.timestamp) {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+        sdf.format(java.util.Date(summary.timestamp))
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                else Color.Transparent
+            )
+            .clickable(onClick = onSelect)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(
+                    if (summary.selectedMode == ChatMode.Chat) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.tertiaryContainer
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (summary.selectedMode == ChatMode.Chat) Icons.Filled.Message
+                else Icons.Filled.SmartToy,
+                contentDescription = if (summary.selectedMode == ChatMode.Chat) "聊天" else "智能体",
+                modifier = Modifier.size(18.dp),
+                tint = if (summary.selectedMode == ChatMode.Chat) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = summary.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = dateString,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Filled.Delete,
+                contentDescription = "删除",
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
             )
         }
     }
