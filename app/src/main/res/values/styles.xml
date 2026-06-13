@@ -4,4 +4,8 @@
         <item name="android:windowActionBar">false</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+
+    <style name="Theme.AgentChat.Splash" parent="@style/Theme.AgentChat">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+    </style>
 </resources>

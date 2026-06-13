@@ -3,9 +3,21 @@ package com.lacknb.agentchat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -29,6 +41,7 @@ import com.lacknb.agentchat.core.network.OpenAiChatCompletionsClient
 import com.lacknb.agentchat.core.provider.ProviderRepository
 import com.lacknb.agentchat.feature.chat.ChatRoute
 import com.lacknb.agentchat.feature.settings.SettingsRoute
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -36,6 +49,7 @@ import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.Theme_AgentChat)
         super.onCreate(savedInstanceState)
         val providerRepository = ProviderRepository(applicationContext)
         val chatClient = OpenAiChatCompletionsClient()
@@ -43,13 +57,40 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AgentChatTheme {
-                AgentChatApp(
-                    providerRepository = providerRepository,
-                    chatClient = chatClient,
-                    agentWorkspace = agentWorkspace,
-                )
+                var showStartupSplash by remember { mutableStateOf(true) }
+
+                LaunchedEffect(Unit) {
+                    delay(1_400)
+                    showStartupSplash = false
+                }
+
+                if (showStartupSplash) {
+                    StartupSplashImage()
+                } else {
+                    AgentChatApp(
+                        providerRepository = providerRepository,
+                        chatClient = chatClient,
+                        agentWorkspace = agentWorkspace,
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun StartupSplashImage() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFCFCF8)),
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.splash_agentchat),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
     }
 }
 
