@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
@@ -557,6 +558,13 @@ private fun ConversationTopBar(
                 Icon(
                     imageVector = Icons.Filled.History,
                     contentDescription = "历史对话",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            IconButton(onClick = onResetConversation) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = "新增会话",
                     tint = MaterialTheme.colorScheme.onSurface
                 )
             }
