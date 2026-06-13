@@ -121,7 +121,7 @@ private suspend fun runAgentChatCompletion(
 ): Result<Unit> = runCatching {
     val profile = providerRepository.currentProfile()
     val apiKey = providerRepository.currentApiKey()
-        ?: error("API key is not configured")
+        ?: error("API 密钥未配置")
     var eventIndex = 0
     val conversation = buildAgentMessages(goal, history).toMutableList()
 
@@ -145,7 +145,7 @@ private suspend fun runAgentChatCompletion(
 
     emitEvent(
         type = AgentEventType.Plan,
-        summary = "Agent mode: decide whether tools are needed, execute them, then continue until a final answer.",
+        summary = "智能体模式：判断是否需要使用工具，在需要时执行工具，然后持续进行直至得出最终答案。",
     )
 
     repeat(MaxAgentToolTurns) { turnIndex ->
@@ -156,7 +156,7 @@ private suspend fun runAgentChatCompletion(
 
         emitEvent(
             type = AgentEventType.Action,
-            summary = "Calling ${profile.defaultModel} with ${agentTools().size} available tools.",
+            summary = "正在使用 ${agentTools().size} 个可用工具调用 ${profile.defaultModel}。",
         )
 
         val request = ChatCompletionRequest(
@@ -178,7 +178,7 @@ private suspend fun runAgentChatCompletion(
                     if (!emittedStreamingObservation) {
                         emitEvent(
                             type = AgentEventType.Observation,
-                            summary = "Model response started streaming.",
+                            summary = "模型响应开始流式传输。",
                         )
                         emittedStreamingObservation = true
                     }
@@ -189,7 +189,7 @@ private suspend fun runAgentChatCompletion(
                     if (announcedToolCallIndexes.add(event.delta.index)) {
                         emitEvent(
                             type = AgentEventType.Action,
-                            summary = "Model requested tool: ${event.delta.functionName ?: "function_${event.delta.index}"}",
+                            summary = "模型请求工具：${event.delta.functionName ?: "函数_${event.delta.index}"}",
                             payloadJson = event.delta.arguments.takeIf { it.isNotBlank() },
                             riskLevel = event.delta.functionName.toolRiskLevel(),
                         )
@@ -216,7 +216,7 @@ private suspend fun runAgentChatCompletion(
         if (toolCalls.isEmpty()) {
             emitEvent(
                 type = AgentEventType.Final,
-                summary = "Agent finished without needing another tool call.",
+                summary = "智能体运行结束，无需调用其他工具。",
             )
             return@runCatching
         }
@@ -248,7 +248,7 @@ private suspend fun runAgentChatCompletion(
 
             emitEvent(
                 type = AgentEventType.Observation,
-                summary = "Tool finished: $toolName",
+                summary = "工具运行结束：$toolName",
                 payloadJson = toolResult.take(1_200),
                 riskLevel = toolName.toolRiskLevel(),
             )
@@ -263,10 +263,10 @@ private suspend fun runAgentChatCompletion(
 
     emitEvent(
         type = AgentEventType.Error,
-        summary = "Agent stopped after $MaxAgentToolTurns tool rounds to avoid an infinite loop.",
+        summary = "为避免死循环，智能体在执行 $MaxAgentToolTurns 轮工具调用后停止。",
     )
     onDelta(
-        "\n\nI reached the tool-round limit before producing a final answer. Try narrowing the task or asking me to continue.",
+        "\n\n我在得出最终答案之前达到了工具调用次数上限。请尝试缩小任务范围，或让我继续执行。",
     )
 }
 
@@ -304,7 +304,7 @@ private suspend fun executeAgentTool(
             )
             "read_file" -> {
                 val file = resolveAgentWorkspaceFile(agentWorkspace, args.getString("path"))
-                require(file.exists() && file.isFile) { "File does not exist: ${args.getString("path")}" }
+                require(file.exists() && file.isFile) { "文件不存在：${args.getString("path")}" }
                 JSONObject()
                     .put("ok", true)
                     .put("path", args.getString("path"))
@@ -323,11 +323,11 @@ private suspend fun executeAgentTool(
             }
             "edit_file" -> {
                 val file = resolveAgentWorkspaceFile(agentWorkspace, args.getString("path"))
-                require(file.exists() && file.isFile) { "File does not exist: ${args.getString("path")}" }
+                require(file.exists() && file.isFile) { "文件不存在：${args.getString("path")}" }
                 val oldText = args.getString("old_text")
                 val newText = args.getString("new_text")
                 val original = file.readText()
-                require(oldText in original) { "old_text was not found in ${args.getString("path")}" }
+                require(oldText in original) { "在 ${args.getString("path")} 中未找到 old_text" }
                 val updated = if (args.optBoolean("replace_all", false)) {
                     original.replace(oldText, newText)
                 } else {
@@ -352,14 +352,14 @@ private suspend fun executeAgentTool(
             else -> {
                 JSONObject()
                     .put("ok", false)
-                    .put("error", "Unknown tool: $name")
+                    .put("error", "未知工具：$name")
                     .toString()
             }
         }
     }.getOrElse { error ->
         JSONObject()
             .put("ok", false)
-            .put("error", error.message ?: "Tool execution failed")
+            .put("error", error.message ?: "工具执行失败")
             .toString()
     }
 }
@@ -371,20 +371,20 @@ private suspend fun runPlanningSubAgent(
     apiKey: String,
     chatClient: ChatCompletionsClient,
 ): String {
-    require(objective.isNotBlank()) { "objective is required" }
+    require(objective.isNotBlank()) { "目标（objective）是必需的" }
     val plan = StringBuilder()
     val request = ChatCompletionRequest(
         model = profile.defaultModel,
         messages = listOf(
             ChatCompletionMessage(
                 role = "system",
-                content = "You are a planning sub-agent. Produce a compact, actionable Markdown plan with assumptions and risks only when useful.",
+                content = "你是一个规划子智能体。在有用的情况下，生成一个紧凑、可操作的 Markdown 格式的计划，并包含假设和风险。",
             ),
             ChatCompletionMessage(
                 role = "user",
                 content = buildString {
-                    appendLine("Objective: $objective")
-                    if (context.isNotBlank()) appendLine("Context: $context")
+                    appendLine("目标：$objective")
+                    if (context.isNotBlank()) appendLine("上下文：$context")
                 },
             ),
         ),
@@ -422,13 +422,13 @@ private fun resolveAgentWorkspaceFile(workspace: File, path: String): File {
     val normalized = path.trim().replace('\\', '/')
     require(normalized.isNotBlank()) { "path is required" }
     require(!normalized.startsWith("/") && normalized.split('/').none { it == ".." }) {
-        "Only relative paths inside the agent workspace are allowed"
+        "仅允许使用智能体工作空间内的相对路径"
     }
     workspace.mkdirs()
     val root = workspace.canonicalFile
     val file = File(root, normalized).canonicalFile
     require(file.path == root.path || file.path.startsWith(root.path + File.separator)) {
-        "Path escapes the agent workspace"
+        "路径超出了智能体工作空间"
     }
     return file
 }
@@ -453,7 +453,7 @@ private suspend fun streamChatCompletion(
 ): Result<Unit> = runCatching {
     val profile = providerRepository.currentProfile()
     val apiKey = providerRepository.currentApiKey()
-        ?: error("API key is not configured")
+        ?: error("API 密钥未配置")
 
     val request = ChatCompletionRequest(
         model = profile.defaultModel,
@@ -500,12 +500,12 @@ private fun buildAgentMessages(
     history: List<ChatMessage>,
 ): List<ChatCompletionMessage> {
     val systemPrompt = """
-        You are AgentChat running in Agent mode.
-        Use ReAct internally: decide whether a tool is needed, call exactly the useful tool when needed, observe the result, then continue.
-        If no tool is needed, answer directly and do not call a tool.
-        For complex or ambiguous work, call plan_agent to create a plan before continuing.
-        read_file, write_file, and edit_file operate only inside the app's private agent workspace.
-        After all needed tool observations are available, provide the final answer in Markdown.
+        你是运行在智能体（Agent）模式下的 AgentChat。
+        内部使用 ReAct 框架：判断是否需要工具，在需要时精确调用有用的工具，观察结果，然后继续。
+        如果不需要工具，请直接回答，不要调用工具。
+        对于复杂或含糊的任务，在继续之前调用 plan_agent 以创建计划。
+        read_file、write_file 和 edit_file 仅在应用的私有智能体工作空间内运行。
+        在所有需要的工具观察结果都可用后，以 Markdown 格式提供最终答案。请务必使用中文进行回复。
     """.trimIndent()
     val recentHistory = history
         .filter { message ->
@@ -537,7 +537,7 @@ private fun agentTools(): List<ChatCompletionTool> {
         ChatCompletionTool(
             function = ChatCompletionFunction(
                 name = "plan_agent",
-                description = "Ask a planning sub-agent to create a compact plan for a complex task. Use this as a tool, not as a user-visible mode.",
+                description = "请求规划子智能体为复杂任务创建一个紧凑的计划。作为工具使用，而不是用户可见的模式。",
                 parametersJson = """
                     {
                       "type": "object",
@@ -553,7 +553,7 @@ private fun agentTools(): List<ChatCompletionTool> {
         ChatCompletionTool(
             function = ChatCompletionFunction(
                 name = "read_file",
-                description = "Read a UTF-8 text file from the app-private agent workspace.",
+                description = "从应用私有的智能体工作空间中读取一个 UTF-8 文本文件。",
                 parametersJson = """
                     {
                       "type": "object",
@@ -568,7 +568,7 @@ private fun agentTools(): List<ChatCompletionTool> {
         ChatCompletionTool(
             function = ChatCompletionFunction(
                 name = "write_file",
-                description = "Write a UTF-8 text file inside the app-private agent workspace, creating parent directories when needed.",
+                description = "在应用私有的智能体工作空间内写入一个 UTF-8 文本文件，必要时创建父目录。",
                 parametersJson = """
                     {
                       "type": "object",
@@ -584,7 +584,7 @@ private fun agentTools(): List<ChatCompletionTool> {
         ChatCompletionTool(
             function = ChatCompletionFunction(
                 name = "edit_file",
-                description = "Replace text in a UTF-8 file inside the app-private agent workspace.",
+                description = "替换应用私有智能体工作空间内 UTF-8 文件中的文本。",
                 parametersJson = """
                     {
                       "type": "object",
@@ -602,7 +602,7 @@ private fun agentTools(): List<ChatCompletionTool> {
         ChatCompletionTool(
             function = ChatCompletionFunction(
                 name = "record_memory_candidate",
-                description = "Propose a memory item that should be shown to the user for approval before saving.",
+                description = "提议一条记忆项，在保存前应展示给用户以进行审批。",
                 parametersJson = """
                     {
                       "type": "object",
@@ -626,13 +626,13 @@ private suspend fun testChatCompletionConnection(
     withTimeout(30_000) {
         val profile = providerRepository.currentProfile()
         val apiKey = providerRepository.currentApiKey()
-            ?: error("API key is not configured")
+            ?: error("API 密钥未配置")
         val request = ChatCompletionRequest(
             model = profile.defaultModel,
             messages = listOf(
                 ChatCompletionMessage(
                     role = "user",
-                    content = "Reply with ok.",
+                    content = "请回复 ok。",
                 ),
             ),
             stream = true,

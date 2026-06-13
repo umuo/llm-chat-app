@@ -151,14 +151,14 @@ fun ChatRoute(
                     onSuccess = {
                         message.copy(
                             content = message.content.ifBlank {
-                                if (message.toolCalls.isNotEmpty()) "Tool call requested." else "Done."
+                                if (message.toolCalls.isNotEmpty()) "已请求工具调用。" else "完成。"
                             },
                             status = MessageStatus.Complete,
                         )
                     },
                     onFailure = { error ->
                         message.copy(
-                            content = message.content.ifBlank { error.message ?: "Request failed" },
+                            content = message.content.ifBlank { error.message ?: "请求失败" },
                             status = MessageStatus.Failed,
                         )
                     },
@@ -256,7 +256,7 @@ private fun ConversationTopBar(
                 ) {
                     StatusDot(active = providerSettings.hasApiKey)
                     Text(
-                        text = "${selectedMode.name} · $turnCount turns · ${providerSettings.model}",
+                        text = "${if (selectedMode == ChatMode.Chat) "聊天" else "智能体"} · $turnCount 轮对话 · ${providerSettings.model}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -273,7 +273,7 @@ private fun ConversationTopBar(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Provider",
+                    text = "服务商",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -309,17 +309,17 @@ private fun EmptyConversation(
             )
         }
         Text(
-            text = "What can I help with?",
+            text = "我能帮您做些什么？",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.SemiBold,
         )
         Text(
             text = if (hasApiKey) {
-                if (selectedMode == ChatMode.Agent) "Use tools when needed, then continue until the task is done."
-                else "Ask anything. Markdown and code blocks stream as they arrive."
+                if (selectedMode == ChatMode.Agent) "在需要时使用工具，然后持续运行直到任务完成。"
+                else "问我任何问题。支持 Markdown 和代码块流式响应。"
             } else {
-                "Add your provider key in Settings to start."
+                "请在设置中添加您的服务商密钥以开始。"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -383,7 +383,7 @@ private fun ComposerBar(
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 if (input.isEmpty()) {
                                     Text(
-                                        text = "Message AgentChat",
+                                        text = "给 AgentChat 发送消息",
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -431,7 +431,7 @@ private fun SendButton(
         } else {
             Icon(
                 imageVector = Icons.Filled.Send,
-                contentDescription = "Send",
+                contentDescription = "发送",
                 tint = if (canSend) MaterialTheme.colorScheme.onPrimary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -453,12 +453,12 @@ private fun ModeSelector(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         SegmentPill(
-            label = "Chat",
+            label = "聊天",
             selected = selectedMode == ChatMode.Chat,
             onClick = { onModeSelected(ChatMode.Chat) },
         )
         SegmentPill(
-            label = "Agent",
+            label = "智能体",
             selected = selectedMode == ChatMode.Agent,
             onClick = { onModeSelected(ChatMode.Agent) },
         )
@@ -593,7 +593,7 @@ private fun MessageContent(
             if (message.status == MessageStatus.Streaming) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "streaming",
+                    text = "流式传输中",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -629,7 +629,7 @@ private fun AgentTraceTimeline(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Agent trace",
+                text = "智能体运行轨迹",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.SemiBold,
@@ -687,13 +687,13 @@ private fun AgentEventType.color() = when (this) {
 }
 
 private fun AgentEventType.label() = when (this) {
-    AgentEventType.Plan -> "Plan"
-    AgentEventType.Action -> "Action"
-    AgentEventType.Observation -> "Observation"
-    AgentEventType.Memory -> "Memory"
-    AgentEventType.UserApproval -> "Approval"
-    AgentEventType.Final -> "Final"
-    AgentEventType.Error -> "Error"
+    AgentEventType.Plan -> "计划"
+    AgentEventType.Action -> "行动"
+    AgentEventType.Observation -> "观察"
+    AgentEventType.Memory -> "记忆"
+    AgentEventType.UserApproval -> "审批"
+    AgentEventType.Final -> "最终结果"
+    AgentEventType.Error -> "错误"
 }
 
 @Composable
@@ -717,13 +717,13 @@ private fun ToolCallBlock(
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Text(
-            text = "Tool call",
+            text = "工具调用",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = toolCall.name ?: "function_${toolCall.index}",
+            text = toolCall.name ?: "函数_${toolCall.index}",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )

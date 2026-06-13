@@ -54,9 +54,9 @@ fun SettingsRoute(
     var status by rememberSaveable(settings.hasApiKey, settings.baseUrl, settings.model) {
         androidx.compose.runtime.mutableStateOf(
             if (settings.hasApiKey) {
-                "Saved · ${settings.model}"
+                "已保存 · ${settings.model}"
             } else {
-                "Missing API key"
+                "缺少 API 密钥"
             },
         )
     }
@@ -68,12 +68,12 @@ fun SettingsRoute(
                 title = {
                     Column {
                         Text(
-                            text = "Provider",
+                            text = "服务商",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "Chat Completions endpoint",
+                            text = "聊天补全端点",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -83,7 +83,7 @@ fun SettingsRoute(
                 },
                 actions = {
                     TextButton(onClick = onBackToChat) {
-                        Text("Done")
+                        Text("完成")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -120,7 +120,7 @@ fun SettingsRoute(
                         value = baseUrl,
                         onValueChange = { baseUrl = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("API Base URL") },
+                        label = { Text("API 基础 URL") },
                         singleLine = true,
                         shape = RoundedCornerShape(8.dp),
                     )
@@ -128,9 +128,9 @@ fun SettingsRoute(
                         value = apiKey,
                         onValueChange = { apiKey = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text(if (settings.hasApiKey) "API Key (${settings.maskedApiKey})" else "API Key") },
+                        label = { Text(if (settings.hasApiKey) "API 密钥 (${settings.maskedApiKey})" else "API 密钥") },
                         placeholder = {
-                            Text(if (settings.hasApiKey) "Leave blank to keep saved key" else "sk-...")
+                            Text(if (settings.hasApiKey) "留空以保留已保存的密钥" else "sk-...")
                         },
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
@@ -140,7 +140,7 @@ fun SettingsRoute(
                         value = model,
                         onValueChange = { model = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Model") },
+                        label = { Text("模型") },
                         singleLine = true,
                         shape = RoundedCornerShape(8.dp),
                     )
@@ -157,25 +157,25 @@ fun SettingsRoute(
                             .fold(
                                 onSuccess = {
                                     apiKey = ""
-                                    "Provider saved"
+                                    "服务商设置已保存"
                                 },
-                                onFailure = { error -> error.message ?: "Unable to save provider" },
+                                onFailure = { error -> error.message ?: "无法保存服务商设置" },
                             )
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    Text("Save")
+                    Text("保存")
                 }
                 FilledTonalButton(
                     onClick = {
                         isTesting = true
-                        status = "Testing..."
+                        status = "正在测试..."
                         scope.launch {
                             status = onTestConnection()
                                 .fold(
-                                    onSuccess = { "Connection OK" },
-                                    onFailure = { error -> error.message ?: "Connection failed" },
+                                    onSuccess = { "连接成功" },
+                                    onFailure = { error -> error.message ?: "连接失败" },
                                 )
                             isTesting = false
                         }
@@ -188,7 +188,7 @@ fun SettingsRoute(
                         contentColor = MaterialTheme.colorScheme.onSurface,
                     ),
                 ) {
-                    Text(if (isTesting) "Testing" else "Test")
+                    Text(if (isTesting) "测试中" else "测试连接")
                 }
             }
         }
@@ -223,7 +223,7 @@ private fun ProviderStatusPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = if (settings.hasApiKey) "Provider ready" else "Provider incomplete",
+                    text = if (settings.hasApiKey) "服务商已就绪" else "服务商信息未完善",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
