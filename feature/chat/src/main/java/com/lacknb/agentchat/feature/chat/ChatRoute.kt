@@ -104,13 +104,16 @@ fun ChatRoute(
     var isSending by rememberSaveableMutableState(false)
     var currentJob by remember { androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+    var programmaticScrollCount by remember { androidx.compose.runtime.mutableStateOf(0) }
+    val isProgrammaticScrolling by remember {
+        androidx.compose.runtime.derivedStateOf { programmaticScrollCount > 0 }
+    }
     var shouldAutoScroll by remember { androidx.compose.runtime.mutableStateOf(true) }
 
-    LaunchedEffect(isUserDragging, listState.canScrollForward) {
+    LaunchedEffect(listState.isScrollInProgress, listState.canScrollForward, isProgrammaticScrolling) {
         if (!listState.canScrollForward) {
             shouldAutoScroll = true
-        } else if (isUserDragging) {
+        } else if (listState.isScrollInProgress && !isProgrammaticScrolling) {
             shouldAutoScroll = false
         }
     }
@@ -121,8 +124,15 @@ fun ChatRoute(
         if (messages.isNotEmpty()) {
             val sizeChanged = messages.size != lastMessagesSize
             lastMessagesSize = messages.size
-            if (sizeChanged || (shouldAutoScroll && !isUserDragging)) {
-                listState.animateScrollToItem(messages.lastIndex)
+            if (sizeChanged || shouldAutoScroll) {
+                try {
+                    programmaticScrollCount++
+                    listState.animateScrollToItem(messages.lastIndex)
+                } catch (e: Exception) {
+                    // Ignored
+                } finally {
+                    programmaticScrollCount--
+                }
             }
         }
     }
