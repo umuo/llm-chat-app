@@ -1262,6 +1262,12 @@ private fun HistoryDialog(
     onSelect: (ConversationSummary) -> Unit,
     onDelete: (ConversationSummary) -> Unit,
 ) {
+    var filterMode by remember { androidx.compose.runtime.mutableStateOf<ChatMode?>(null) }
+    val filteredSummaries = remember(summaries, filterMode) {
+        if (filterMode == null) summaries
+        else summaries.filter { it.selectedMode == filterMode }
+    }
+
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
         Card(
             modifier = Modifier
@@ -1276,7 +1282,8 @@ private fun HistoryDialog(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1297,8 +1304,42 @@ private fun HistoryDialog(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-                if (summaries.isEmpty()) {
+
+                // Filter Tabs Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val chips = listOf(
+                        null to "全部",
+                        ChatMode.Chat to "普通聊天",
+                        ChatMode.Agent to "智能体"
+                    )
+                    chips.forEach { (mode, label) ->
+                        val isSelected = filterMode == mode
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                                .clickable { filterMode = mode }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                                       else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                if (filteredSummaries.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -1306,7 +1347,7 @@ private fun HistoryDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "暂无历史对话记录",
+                            text = "暂无匹配的历史对话",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
@@ -1316,7 +1357,7 @@ private fun HistoryDialog(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(summaries, key = { it.id }) { summary ->
+                        items(filteredSummaries, key = { it.id }) { summary ->
                             HistoryItem(
                                 summary = summary,
                                 isCurrent = summary.id == currentConversationId,
@@ -1376,14 +1417,43 @@ private fun HistoryItem(
             )
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = summary.title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = summary.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                val tagColor = if (summary.selectedMode == ChatMode.Chat) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                }
+                val tagTextColor = if (summary.selectedMode == ChatMode.Chat) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tagColor)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (summary.selectedMode == ChatMode.Chat) "聊天" else "智能体",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tagTextColor,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
             Text(
                 text = dateString,
                 style = MaterialTheme.typography.bodySmall,
