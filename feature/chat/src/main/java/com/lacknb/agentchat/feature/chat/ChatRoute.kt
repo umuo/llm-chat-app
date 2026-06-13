@@ -8,6 +8,7 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,25 +104,24 @@ fun ChatRoute(
     var isSending by rememberSaveableMutableState(false)
     var currentJob by remember { androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-    val isAtBottom = remember {
-        androidx.compose.runtime.derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val visibleItemsInfo = layoutInfo.visibleItemsInfo
-            if (visibleItemsInfo.isEmpty()) {
-                true
-            } else {
-                val lastVisibleItem = visibleItemsInfo.last()
-                lastVisibleItem.index == layoutInfo.totalItemsCount - 1
-            }
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+    var shouldAutoScroll by remember { androidx.compose.runtime.mutableStateOf(true) }
+
+    LaunchedEffect(isUserDragging, listState.canScrollForward) {
+        if (!listState.canScrollForward) {
+            shouldAutoScroll = true
+        } else if (isUserDragging) {
+            shouldAutoScroll = false
         }
     }
+
     var lastMessagesSize by remember { androidx.compose.runtime.mutableStateOf(0) }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.content, messages.lastOrNull()?.toolCalls) {
         if (messages.isNotEmpty()) {
             val sizeChanged = messages.size != lastMessagesSize
             lastMessagesSize = messages.size
-            if (sizeChanged || isAtBottom.value) {
+            if (sizeChanged || (shouldAutoScroll && !isUserDragging)) {
                 listState.animateScrollToItem(messages.lastIndex)
             }
         }
