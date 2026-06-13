@@ -33,13 +33,22 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -200,59 +209,196 @@ fun ChatRoute(
         }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            ConversationTopBar(
-                providerSettings = providerSettings,
-                selectedMode = selectedMode,
-                turnCount = messages.count { it.role == MessageRole.User },
-                onOpenSettings = onOpenSettings,
-                onResetConversation = ::resetConversation,
-            )
-        },
-        bottomBar = {
-            ComposerBar(
-                input = input,
-                onInputChange = { input = it },
-                selectedMode = selectedMode,
-                onModeSelected = { selectedMode = it },
-                isSending = isSending,
-                onSend = ::sendMessage,
-                onStop = ::stopGeneration,
-                modifier = Modifier
-                    .navigationBarsPadding()
-                    .imePadding(),
-            )
-        },
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(innerPadding),
-        ) {
-            if (messages.isEmpty()) {
-                EmptyConversation(
-                    hasApiKey = providerSettings.hasApiKey,
-                    selectedMode = selectedMode,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(horizontal = 28.dp),
-                )
-            }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(300.dp),
+                drawerContainerColor = MaterialTheme.colorScheme.surface,
             ) {
-                items(messages, key = { it.id }) { message ->
-                    MessageRow(
-                        message = message,
-                        agentEvents = agentEventsByMessage[message.id].orEmpty(),
+                Spacer(modifier = Modifier.height(16.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "A",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "AgentChat",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
+                    Text(
+                        text = "智能 AI 助手",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+
+                NavigationDrawerItem(
+                    label = { Text("智能对话", fontWeight = FontWeight.Medium) },
+                    selected = true,
+                    onClick = {
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                    colors = NavigationDrawerItemDefaults.colors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "内部知识库",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "规划中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "工具中心",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "规划中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                NavigationDrawerItem(
+                    label = { Text("服务商设置", fontWeight = FontWeight.Medium) },
+                    selected = false,
+                    onClick = {
+                        scope.launch { drawerState.close() }
+                        onOpenSettings()
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "设置",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    ) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                ConversationTopBar(
+                    providerSettings = providerSettings,
+                    selectedMode = selectedMode,
+                    turnCount = messages.count { it.role == MessageRole.User },
+                    onOpenSettings = onOpenSettings,
+                    onResetConversation = ::resetConversation,
+                    onOpenDrawer = {
+                        scope.launch {
+                            drawerState.open()
+                        }
+                    }
+                )
+            },
+            bottomBar = {
+                ComposerBar(
+                    input = input,
+                    onInputChange = { input = it },
+                    selectedMode = selectedMode,
+                    onModeSelected = { selectedMode = it },
+                    isSending = isSending,
+                    onSend = ::sendMessage,
+                    onStop = ::stopGeneration,
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .imePadding(),
+                )
+            },
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(innerPadding),
+            ) {
+                if (messages.isEmpty()) {
+                    EmptyConversation(
+                        hasApiKey = providerSettings.hasApiKey,
+                        selectedMode = selectedMode,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 28.dp),
+                    )
+                }
+
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    items(messages, key = { it.id }) { message ->
+                        MessageRow(
+                            message = message,
+                            agentEvents = agentEventsByMessage[message.id].orEmpty(),
+                        )
+                    }
                 }
             }
         }
@@ -266,6 +412,7 @@ private fun ConversationTopBar(
     turnCount: Int,
     onOpenSettings: () -> Unit,
     onResetConversation: () -> Unit,
+    onOpenDrawer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -274,10 +421,17 @@ private fun ConversationTopBar(
         tonalElevation = 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(start = 18.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(start = 6.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            IconButton(onClick = onOpenDrawer) {
+                Icon(
+                    imageVector = Icons.Filled.Menu,
+                    contentDescription = "菜单",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "AgentChat",
