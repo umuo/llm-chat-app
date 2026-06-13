@@ -145,7 +145,7 @@ private suspend fun runAgentChatCompletion(
 
     emitEvent(
         type = AgentEventType.Plan,
-        summary = "智能体模式：判断是否需要使用工具，在需要时执行工具，然后持续进行直至得出最终答案。",
+        summary = "智能体模式：根据是否有工具调用执行操作，无工具调用时直接回复并结束。",
     )
 
     repeat(MaxAgentToolTurns) { turnIndex ->
@@ -502,11 +502,10 @@ private fun buildAgentMessages(
 ): List<ChatCompletionMessage> {
     val systemPrompt = """
         你是运行在智能体（Agent）模式下的 AgentChat。
-        内部使用 ReAct 框架：判断是否需要工具，在需要时精确调用有用的工具，观察结果，然后继续。
-        如果不需要工具，请直接回答，不要调用工具。
-        对于复杂或含糊的任务，在继续之前调用 plan_agent 以创建计划。
-        read_file、write_file 和 edit_file 仅在应用的私有智能体工作空间内运行。
-        在所有需要的工具观察结果都可用后，以 Markdown 格式提供最终答案。请务必使用中文进行回复。
+        你可以通过调用可用的工具来协助用户完成任务。
+        如果需要使用工具，请直接进行工具调用。
+        如果不需要使用工具，或者在获得工具返回的结果后，请直接给出最终的回答。
+        请务必使用中文进行回复。
     """.trimIndent()
     val recentHistory = history
         .filter { message ->
