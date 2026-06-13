@@ -92,11 +92,35 @@ fun ChatRoute(
     var input by rememberSaveableMutableState("")
     var selectedMode by rememberSaveableMutableState(ChatMode.Chat)
     var isSending by rememberSaveableMutableState(false)
+    var currentJob by remember { androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.content, messages.lastOrNull()?.toolCalls) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
         }
+    }
+
+    fun stopGeneration() {
+        currentJob?.cancel()
+        currentJob = null
+        isSending = false
+        val lastAssistantMessage = messages.lastOrNull { it.role == MessageRole.Assistant }
+        if (lastAssistantMessage != null && lastAssistantMessage.status == MessageStatus.Streaming) {
+            messages.updateMessage(lastAssistantMessage.id) { message ->
+                message.copy(
+                    content = message.content.ifBlank { "已停止生成。" },
+                    status = MessageStatus.Complete,
+                )
+            }
+        }
+    }
+
+    fun resetConversation() {
+        currentJob?.cancel()
+        currentJob = null
+        isSending = false
+        messages.clear()
+        agentEventsByMessage.clear()
     }
 
     fun sendMessage() {
@@ -118,7 +142,7 @@ fun ChatRoute(
         input = ""
         isSending = true
 
-        scope.launch {
+        currentJob = scope.launch {
             val result = if (selectedMode == ChatMode.Chat) {
                 onSendMessage(
                     messages.toList(),
@@ -172,6 +196,7 @@ fun ChatRoute(
                 )
             }
             isSending = false
+            currentJob = null
         }
     }
 
@@ -183,6 +208,7 @@ fun ChatRoute(
                 selectedMode = selectedMode,
                 turnCount = messages.count { it.role == MessageRole.User },
                 onOpenSettings = onOpenSettings,
+                onResetConversation = ::resetConversation,
             )
         },
         bottomBar = {
@@ -193,6 +219,7 @@ fun ChatRoute(
                 onModeSelected = { selectedMode = it },
                 isSending = isSending,
                 onSend = ::sendMessage,
+                onStop = ::stopGeneration,
                 modifier = Modifier
                     .navigationBarsPadding()
                     .imePadding(),
@@ -238,6 +265,7 @@ private fun ConversationTopBar(
     selectedMode: ChatMode,
     turnCount: Int,
     onOpenSettings: () -> Unit,
+    onResetConversation: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -270,6 +298,21 @@ private fun ConversationTopBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                    .clickable(onClick = onResetConversation)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "清除",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
             }
             Box(
                 modifier = Modifier
@@ -342,6 +385,7 @@ private fun ComposerBar(
     onModeSelected: (ChatMode) -> Unit,
     isSending: Boolean,
     onSend: () -> Unit,
+    onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -403,6 +447,7 @@ private fun ComposerBar(
                         isSending = isSending,
                         enabled = input.isNotBlank(),
                         onSend = onSend,
+                        onStop = onStop,
                     )
                 }
             }
@@ -415,6 +460,7 @@ private fun SendButton(
     isSending: Boolean,
     enabled: Boolean,
     onSend: () -> Unit,
+    onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val canSend = enabled && !isSending
@@ -423,17 +469,18 @@ private fun SendButton(
             .size(42.dp)
             .clip(CircleShape)
             .background(
-                if (canSend) MaterialTheme.colorScheme.primary
+                if (isSending) MaterialTheme.colorScheme.error
+                else if (canSend) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant,
             )
-            .clickable(enabled = canSend, onClick = onSend),
+            .clickable(enabled = isSending || canSend, onClick = if (isSending) onStop else onSend),
         contentAlignment = Alignment.Center,
     ) {
         if (isSending) {
-            Text(
-                text = "...",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .background(MaterialTheme.colorScheme.onError, shape = RoundedCornerShape(2.dp))
             )
         } else {
             Icon(
