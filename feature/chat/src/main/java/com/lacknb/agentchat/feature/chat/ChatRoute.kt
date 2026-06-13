@@ -86,6 +86,18 @@ import com.lacknb.agentchat.core.model.MessageStatus
 import com.lacknb.agentchat.core.model.ProviderSettings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Image
+import android.net.Uri
+import android.content.Context
+import com.lacknb.agentchat.core.model.ChatAttachment
+import kotlinx.coroutines.Dispatchers
 
 @Composable
 fun ChatRoute(
@@ -114,6 +126,46 @@ fun ChatRoute(
     val listState = rememberLazyListState()
     val agentEventsByMessage = remember { mutableStateMapOf<String, List<AgentEvent>>() }
     val messages = remember { mutableStateListOf<ChatMessage>() }
+    val selectedAttachments = remember { androidx.compose.runtime.mutableStateListOf<ChatAttachment>() }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                val processed = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    uris.mapNotNull { uri ->
+                        val fileName = getFileName(context, uri)
+                        val mimeType = context.contentResolver.getType(uri) ?: ""
+                        val isImage = mimeType.startsWith("image/") || fileName.lowercase().let {
+                            it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") || it.endsWith(".webp") || it.endsWith(".gif")
+                        }
+                        if (isImage) {
+                            val base64 = readUriAsBase64(context, uri)
+                            if (base64 != null) {
+                                ChatAttachment(
+                                    name = fileName,
+                                    mimeType = mimeType,
+                                    isImage = true,
+                                    base64Data = base64
+                                )
+                            } else null
+                        } else {
+                            val textContent = DocumentTextExtractor.extractTextFromFile(context, uri, fileName)
+                            ChatAttachment(
+                                name = fileName,
+                                mimeType = mimeType,
+                                isImage = false,
+                                textContent = textContent
+                            )
+                        }
+                    }
+                }
+                selectedAttachments.addAll(processed)
+            }
+        }
+    }
+
     var input by rememberSaveableMutableState("")
     var selectedMode by rememberSaveableMutableState(ChatMode.Chat)
     var isSending by rememberSaveableMutableState(false)
@@ -185,12 +237,27 @@ fun ChatRoute(
 
     fun sendMessage() {
         val trimmed = input.trim()
-        if (trimmed.isEmpty() || isSending) return
+        if ((trimmed.isEmpty() && selectedAttachments.isEmpty()) || isSending) return
+
+        val builder = java.lang.StringBuilder(trimmed)
+        val docs = selectedAttachments.filter { !it.isImage }
+        if (docs.isNotEmpty()) {
+            builder.append("\n\n--- 附件文件 ---\n")
+            docs.forEach { doc ->
+                builder.append("文件名: ").append(doc.name).append("\n")
+                builder.append("内容:\n").append(doc.textContent ?: "").append("\n")
+                builder.append("-------------------------\n")
+            }
+        }
+        val finalContent = builder.toString()
+        val imageUrls = selectedAttachments.filter { it.isImage }.mapNotNull { it.base64Data }
 
         messages += ChatMessage(
             id = "user-${messages.size}",
             role = MessageRole.User,
-            content = trimmed,
+            content = finalContent,
+            imageUrls = imageUrls,
+            attachments = selectedAttachments.toList(),
         )
         val assistantId = "assistant-${messages.size}"
         messages += ChatMessage(
@@ -200,6 +267,7 @@ fun ChatRoute(
             status = MessageStatus.Streaming,
         )
         input = ""
+        selectedAttachments.clear()
         isSending = true
 
         val savedId = historyManager.saveConversation(
@@ -227,7 +295,7 @@ fun ChatRoute(
                 )
             } else {
                 onRunAgent(
-                    trimmed,
+                    finalContent,
                     messages.toList(),
                     { event ->
                         agentEventsByMessage[assistantId] = agentEventsByMessage[assistantId].orEmpty() + event
@@ -436,6 +504,9 @@ fun ChatRoute(
                     isSending = isSending,
                     onSend = ::sendMessage,
                     onStop = ::stopGeneration,
+                    selectedAttachments = selectedAttachments,
+                    onAttachFileClick = { filePickerLauncher.launch("*/*") },
+                    onRemoveAttachment = { selectedAttachments.remove(it) },
                     modifier = Modifier
                         .navigationBarsPadding()
                         .imePadding(),
@@ -655,6 +726,9 @@ private fun ComposerBar(
     isSending: Boolean,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    selectedAttachments: List<ChatAttachment>,
+    onAttachFileClick: () -> Unit,
+    onRemoveAttachment: (ChatAttachment) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -671,6 +745,21 @@ private fun ComposerBar(
                 onModeSelected = onModeSelected,
             )
 
+            if (selectedAttachments.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    items(selectedAttachments) { attachment ->
+                        AttachmentPreviewChip(
+                            attachment = attachment,
+                            onRemove = { onRemoveAttachment(attachment) }
+                        )
+                    }
+                }
+            }
+
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
@@ -684,10 +773,21 @@ private fun ComposerBar(
                             color = MaterialTheme.colorScheme.outlineVariant,
                             shape = RoundedCornerShape(24.dp),
                         )
-                        .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        .padding(start = 8.dp, top = 6.dp, end = 8.dp, bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    IconButton(
+                        onClick = onAttachFileClick,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AttachFile,
+                            contentDescription = "添加附件",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     BasicTextField(
                         value = input,
                         onValueChange = onInputChange,
@@ -714,7 +814,7 @@ private fun ComposerBar(
                     )
                     SendButton(
                         isSending = isSending,
-                        enabled = input.isNotBlank(),
+                        enabled = input.isNotBlank() || selectedAttachments.isNotEmpty(),
                         onSend = onSend,
                         onStop = onStop,
                     )
@@ -896,7 +996,13 @@ private fun MessageContent(
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MarkdownContent(markdown = message.content, color = contentColor)
+                val displayContent = message.content.substringBefore("\n\n--- 附件文件")
+                if (displayContent.isNotBlank()) {
+                    MarkdownContent(markdown = displayContent, color = contentColor)
+                }
+                if (message.attachments.isNotEmpty()) {
+                    MessageAttachments(attachments = message.attachments)
+                }
             }
         }
         return
@@ -1296,5 +1402,187 @@ private fun HistoryItem(
                 tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
             )
         }
+    }
+}
+
+@Composable
+private fun AttachmentPreviewChip(
+    attachment: ChatAttachment,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.height(40.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            val base64Data = attachment.base64Data
+            if (attachment.isImage && base64Data != null) {
+                val imageBitmap = remember(base64Data) {
+                    try {
+                        val base64Str = base64Data.substringAfter("base64,")
+                        val bytes = android.util.Base64.decode(base64Str, android.util.Base64.DEFAULT)
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (imageBitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = imageBitmap,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Image,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.Description,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Text(
+                text = attachment.name,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 120.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "删除",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .clickable { onRemove() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageAttachments(
+    attachments: List<ChatAttachment>,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        attachments.forEach { attachment ->
+            val base64Data = attachment.base64Data
+            if (attachment.isImage && base64Data != null) {
+                val imageBitmap = remember(base64Data) {
+                    try {
+                        val base64Str = base64Data.substringAfter("base64,")
+                        val bytes = android.util.Base64.decode(base64Str, android.util.Base64.DEFAULT)
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (imageBitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = imageBitmap,
+                        contentDescription = attachment.name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Description,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column {
+                            Text(
+                                text = attachment.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "文档附件",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun getFileName(context: Context, uri: Uri): String {
+    var result: String? = null
+    if (uri.scheme == "content") {
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1) {
+                    result = it.getString(nameIndex)
+                }
+            }
+        }
+    }
+    if (result == null) {
+        result = uri.path
+        val cut = result?.lastIndexOf('/') ?: -1
+        if (cut != -1) {
+            result = result?.substring(cut + 1)
+        }
+    }
+    return result ?: "unknown"
+}
+
+private fun readUriAsBase64(context: Context, uri: Uri): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val bytes = inputStream.use { it.readBytes() }
+        val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        "data:$mimeType;base64,$base64"
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }

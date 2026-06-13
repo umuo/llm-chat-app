@@ -104,7 +104,28 @@ private fun ChatCompletionRequest.toJson(): JSONObject {
                             )
                         }
                         if (message.content != null || message.toolCalls.isEmpty()) {
-                            put("content", message.content.orEmpty())
+                            if (message.imageUrls.isEmpty()) {
+                                put("content", message.content.orEmpty())
+                            } else {
+                                val contentArray = JSONArray().apply {
+                                    put(
+                                        JSONObject()
+                                            .put("type", "text")
+                                            .put("text", message.content.orEmpty())
+                                    )
+                                    message.imageUrls.forEach { imageUrl ->
+                                        put(
+                                            JSONObject()
+                                                .put("type", "image_url")
+                                                .put(
+                                                    "image_url",
+                                                    JSONObject().put("url", imageUrl)
+                                                )
+                                        )
+                                    }
+                                }
+                                put("content", contentArray)
+                            }
                         }
                     },
             )

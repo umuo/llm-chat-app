@@ -4,6 +4,7 @@ import android.content.Context
 import com.lacknb.agentchat.core.harness.AgentEvent
 import com.lacknb.agentchat.core.harness.AgentEventType
 import com.lacknb.agentchat.core.harness.RiskLevel
+import com.lacknb.agentchat.core.model.ChatAttachment
 import com.lacknb.agentchat.core.model.ChatMessage
 import com.lacknb.agentchat.core.model.ChatMode
 import com.lacknb.agentchat.core.model.ChatToolCall
@@ -191,9 +192,18 @@ class ConversationHistoryManager(private val context: Context) {
         put("role", role.name)
         put("content", content)
         put("status", status.name)
+        
         val toolCallsArray = JSONArray()
         toolCalls.forEach { toolCallsArray.put(it.toJson()) }
         put("toolCalls", toolCallsArray)
+
+        val imageUrlsArray = JSONArray()
+        imageUrls.forEach { imageUrlsArray.put(it) }
+        put("imageUrls", imageUrlsArray)
+
+        val attachmentsArray = JSONArray()
+        attachments.forEach { attachmentsArray.put(it.toJson()) }
+        put("attachments", attachmentsArray)
     }
 
     private fun JSONObject.toChatMessage(): ChatMessage {
@@ -201,12 +211,44 @@ class ConversationHistoryManager(private val context: Context) {
         val role = MessageRole.valueOf(getString("role"))
         val content = getString("content")
         val status = MessageStatus.valueOf(getString("status"))
+        
         val toolCallsArray = getJSONArray("toolCalls")
         val toolCallsList = mutableListOf<ChatToolCall>()
         for (i in 0 until toolCallsArray.length()) {
             toolCallsList.add(toolCallsArray.getJSONObject(i).toChatToolCall())
         }
-        return ChatMessage(id, role, content, toolCallsList, status)
+
+        val imageUrlsArray = optJSONArray("imageUrls") ?: JSONArray()
+        val imageUrlsList = mutableListOf<String>()
+        for (i in 0 until imageUrlsArray.length()) {
+            imageUrlsList.add(imageUrlsArray.getString(i))
+        }
+
+        val attachmentsArray = optJSONArray("attachments") ?: JSONArray()
+        val attachmentsList = mutableListOf<ChatAttachment>()
+        for (i in 0 until attachmentsArray.length()) {
+            attachmentsList.add(attachmentsArray.getJSONObject(i).toChatAttachment())
+        }
+
+        return ChatMessage(id, role, content, toolCallsList, status, imageUrlsList, attachmentsList)
+    }
+
+    private fun ChatAttachment.toJson(): JSONObject = JSONObject().apply {
+        put("name", name)
+        put("mimeType", mimeType)
+        put("isImage", isImage)
+        put("base64Data", base64Data)
+        put("textContent", textContent)
+    }
+
+    private fun JSONObject.toChatAttachment(): ChatAttachment {
+        return ChatAttachment(
+            name = getString("name"),
+            mimeType = getString("mimeType"),
+            isImage = getBoolean("isImage"),
+            base64Data = if (isNull("base64Data")) null else optString("base64Data"),
+            textContent = if (isNull("textContent")) null else optString("textContent"),
+        )
     }
 
     private fun ChatToolCall.toJson(): JSONObject = JSONObject().apply {

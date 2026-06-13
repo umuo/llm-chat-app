@@ -16,6 +16,7 @@ data class ChatCompletionMessage(
     val content: String? = null,
     val toolCallId: String? = null,
     val toolCalls: List<ChatCompletionToolCall> = emptyList(),
+    val imageUrls: List<String> = emptyList(),
 )
 
 data class ChatCompletionToolCall(

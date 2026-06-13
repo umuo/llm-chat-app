@@ -460,13 +460,14 @@ private suspend fun streamChatCompletion(
         messages = messages
             .filter { message ->
                 message.status != MessageStatus.Streaming &&
-                    message.content.isNotBlank() &&
+                    (message.content.isNotBlank() || message.imageUrls.isNotEmpty()) &&
                     message.role in setOf(MessageRole.User, MessageRole.Assistant, MessageRole.System)
             }
             .map { message ->
                 ChatCompletionMessage(
                     role = message.role.toChatCompletionRole(),
                     content = message.content,
+                    imageUrls = message.imageUrls,
                 )
             },
         stream = true,
@@ -511,7 +512,7 @@ private fun buildAgentMessages(
         .filter { message ->
             message.status == MessageStatus.Complete &&
                 message.id != "welcome" &&
-                message.content.isNotBlank() &&
+                (message.content.isNotBlank() || message.imageUrls.isNotEmpty()) &&
                 message.role in setOf(MessageRole.User, MessageRole.Assistant)
         }
         .takeLast(8)
@@ -519,6 +520,7 @@ private fun buildAgentMessages(
             ChatCompletionMessage(
                 role = message.role.toChatCompletionRole(),
                 content = message.content,
+                imageUrls = message.imageUrls,
             )
         }
 

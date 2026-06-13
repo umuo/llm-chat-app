@@ -16,6 +16,16 @@ data class ChatMessage(
     val content: String,
     val toolCalls: List<ChatToolCall> = emptyList(),
     val status: MessageStatus = MessageStatus.Complete,
+    val imageUrls: List<String> = emptyList(),
+    val attachments: List<ChatAttachment> = emptyList(),
+)
+
+data class ChatAttachment(
+    val name: String,
+    val mimeType: String,
+    val isImage: Boolean,
+    val base64Data: String? = null,
+    val textContent: String? = null,
 )
 
 data class ChatToolCall(
