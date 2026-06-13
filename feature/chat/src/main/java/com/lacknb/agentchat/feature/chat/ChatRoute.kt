@@ -1,5 +1,10 @@
 package com.lacknb.agentchat.feature.chat
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -59,6 +65,7 @@ import com.lacknb.agentchat.core.model.ChatToolCall
 import com.lacknb.agentchat.core.model.MessageRole
 import com.lacknb.agentchat.core.model.MessageStatus
 import com.lacknb.agentchat.core.model.ProviderSettings
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -592,6 +599,12 @@ private fun MessageContent(
             )
             if (message.status == MessageStatus.Streaming) {
                 Spacer(modifier = Modifier.width(8.dp))
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 1.5.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "流式传输中",
                     style = MaterialTheme.typography.labelSmall,
@@ -604,6 +617,8 @@ private fun MessageContent(
                 markdown = message.content,
                 color = contentColor,
             )
+        } else if (message.status == MessageStatus.Streaming) {
+            ThinkingIndicator()
         }
         if (agentEvents.isNotEmpty()) {
             AgentTraceTimeline(events = agentEvents)
@@ -773,5 +788,50 @@ private fun List<ChatToolCall>.merge(delta: ChatToolCall): List<ChatToolCall> {
             name = delta.name ?: existing.name,
             arguments = existing.arguments + delta.arguments,
         )
+    }
+}
+
+@Composable
+private fun ThinkingIndicator(
+    modifier: Modifier = Modifier,
+) {
+    val dotStates = listOf(
+        remember { Animatable(0.2f) },
+        remember { Animatable(0.2f) },
+        remember { Animatable(0.2f) },
+    )
+
+    dotStates.forEachIndexed { index, animatable ->
+        LaunchedEffect(animatable) {
+            delay(index * 150L)
+            animatable.animateTo(
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = keyframes {
+                        durationMillis = 900
+                        0.2f at 0 with LinearOutSlowInEasing
+                        1f at 300 with LinearOutSlowInEasing
+                        0.2f at 600 with LinearOutSlowInEasing
+                        0.2f at 900 with LinearOutSlowInEasing
+                    },
+                    repeatMode = RepeatMode.Restart,
+                ),
+            )
+        }
+    }
+
+    Row(
+        modifier = modifier.padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        dotStates.forEach { animatable ->
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = animatable.value)),
+            )
+        }
     }
 }
