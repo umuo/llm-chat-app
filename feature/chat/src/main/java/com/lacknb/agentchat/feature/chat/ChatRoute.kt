@@ -1034,103 +1034,99 @@ private fun MessageContent(
                 )
             }
         }
+
+        if (agentEvents.isNotEmpty()) {
+            agentEvents.forEach { event ->
+                when (event.type) {
+                    AgentEventType.Action -> {
+                        if (event.summary.startsWith("模型请求工具：")) {
+                            val toolName = event.summary.substringAfter("模型请求工具：")
+                            ToolCallBlock(
+                                toolCall = ChatToolCall(
+                                    index = 0,
+                                    name = toolName,
+                                    arguments = event.payloadJson ?: ""
+                                )
+                            )
+                        }
+                    }
+                    AgentEventType.Observation -> {
+                        if (event.summary.startsWith("工具运行结束：")) {
+                            val toolName = event.summary.substringAfter("工具运行结束：")
+                            ToolObservationBlock(
+                                toolName = toolName,
+                                result = event.payloadJson ?: ""
+                            )
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        } else {
+            message.toolCalls.forEach { toolCall ->
+                ToolCallBlock(toolCall = toolCall)
+            }
+        }
+
         if (message.content.isNotBlank()) {
             MarkdownContent(
                 markdown = message.content,
                 color = contentColor,
             )
-        } else if (message.status == MessageStatus.Streaming) {
+        } else if (message.status == MessageStatus.Streaming && agentEvents.none { it.type == AgentEventType.Observation && it.summary.startsWith("工具运行结束：") }) {
             ThinkingIndicator()
         }
-        if (agentEvents.isNotEmpty()) {
-            AgentTraceTimeline(events = agentEvents)
-        }
-        message.toolCalls.forEach { toolCall ->
-            ToolCallBlock(toolCall = toolCall)
-        }
     }
 }
 
 @Composable
-private fun AgentTraceTimeline(
-    events: List<AgentEvent>,
+private fun ToolObservationBlock(
+    toolName: String,
+    result: String,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(16.dp),
+            )
+            .background(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(16.dp),
+            )
+            .padding(13.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            Icon(
+                imageVector = Icons.Filled.Description,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(16.dp)
+            )
             Text(
-                text = "智能体运行轨迹",
+                text = "工具返回结果：$toolName",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.secondary,
                 fontWeight = FontWeight.SemiBold,
             )
-            events.takeLast(5).forEach { event ->
-                AgentEventRow(event = event)
-            }
         }
-    }
-}
-
-@Composable
-private fun AgentEventRow(
-    event: AgentEvent,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Box(
-            modifier = Modifier
-                .padding(top = 6.dp)
-                .size(7.dp)
-                .background(
-                    color = event.type.color(),
-                    shape = CircleShape,
-                ),
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        if (result.isNotBlank()) {
+            CodeBlock(code = result)
+        } else {
             Text(
-                text = event.type.label(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = event.summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = "（无返回内容）",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
-}
-
-@Composable
-private fun AgentEventType.color() = when (this) {
-    AgentEventType.Plan -> MaterialTheme.colorScheme.primary
-    AgentEventType.Action -> MaterialTheme.colorScheme.tertiary
-    AgentEventType.Observation -> MaterialTheme.colorScheme.secondary
-    AgentEventType.Memory -> MaterialTheme.colorScheme.secondary
-    AgentEventType.UserApproval -> MaterialTheme.colorScheme.error
-    AgentEventType.Final -> MaterialTheme.colorScheme.primary
-    AgentEventType.Error -> MaterialTheme.colorScheme.error
-}
-
-private fun AgentEventType.label() = when (this) {
-    AgentEventType.Plan -> "计划"
-    AgentEventType.Action -> "行动"
-    AgentEventType.Observation -> "观察"
-    AgentEventType.Memory -> "记忆"
-    AgentEventType.UserApproval -> "审批"
-    AgentEventType.Final -> "最终结果"
-    AgentEventType.Error -> "错误"
 }
 
 @Composable
