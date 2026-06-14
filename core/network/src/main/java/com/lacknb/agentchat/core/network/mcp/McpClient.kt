@@ -24,11 +24,15 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class McpClient {
-    private val client = OkHttpClient.Builder()
+    private val sseClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS) // SSE needs no read timeout
         .build()
 
-    private val eventSourceFactory = EventSources.createFactory(client)
+    private val rpcClient = sseClient.newBuilder()
+        .readTimeout(10, TimeUnit.SECONDS) // RPC requests should timeout to prevent hanging
+        .build()
+
+    private val eventSourceFactory = EventSources.createFactory(sseClient)
     private var eventSource: EventSource? = null
     private var postEndpoint: String? = null
 
@@ -117,7 +121,7 @@ class McpClient {
             .build()
 
         return@withContext suspendCancellableCoroutine { continuation ->
-            client.newCall(request).enqueue(object : Callback {
+            rpcClient.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     if (continuation.isActive) continuation.resumeWithException(e)
                 }
