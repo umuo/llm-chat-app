@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Send
@@ -1070,12 +1072,13 @@ private fun MessageContent(
                     AgentEventType.Action -> {
                         if (event.summary.startsWith("模型请求工具：")) {
                             val toolName = event.summary.substringAfter("模型请求工具：")
+                            val mergedToolCall = message.toolCalls.firstOrNull { it.name == toolName }
                             ToolCallBlock(
-                                toolCall = ChatToolCall(
+                                toolCall = mergedToolCall ?: ChatToolCall(
                                     index = 0,
                                     name = toolName,
-                                    arguments = event.payloadJson ?: ""
-                                )
+                                    arguments = event.payloadJson ?: "",
+                                ),
                             )
                         }
                     }
@@ -1163,6 +1166,9 @@ private fun ToolCallBlock(
     toolCall: ChatToolCall,
     modifier: Modifier = Modifier,
 ) {
+    var expanded by rememberSaveable(toolCall.name, toolCall.arguments) { androidx.compose.runtime.mutableStateOf(false) }
+    val hasArguments = toolCall.arguments.isNotBlank()
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1178,18 +1184,45 @@ private fun ToolCallBlock(
             .padding(13.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Text(
-            text = "工具调用",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = toolCall.name ?: "函数_${toolCall.index}",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        if (toolCall.arguments.isNotBlank()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = hasArguments) { expanded = !expanded }
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = if (expanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
+                contentDescription = if (expanded) "收起工具参数" else "展开工具参数",
+                tint = if (hasArguments) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "工具调用",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = toolCall.name ?: "函数_${toolCall.index}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Text(
+                text = if (hasArguments) {
+                    if (expanded) "收起参数" else "查看参数"
+                } else {
+                    "无参数"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (hasArguments && expanded) {
             CodeBlock(code = toolCall.arguments)
         }
     }

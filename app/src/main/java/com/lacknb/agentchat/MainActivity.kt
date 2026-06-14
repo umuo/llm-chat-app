@@ -51,7 +51,7 @@ import com.lacknb.agentchat.tool.PlanAgentTool
 import com.lacknb.agentchat.tool.ReadFileTool
 import com.lacknb.agentchat.tool.WriteFileTool
 import com.lacknb.agentchat.tool.EditFileTool
-import com.lacknb.agentchat.tool.RecordMemoryCandidateTool
+import com.lacknb.agentchat.tool.ManageMemoryTool
 import com.lacknb.agentchat.tool.ManagePromptsTool
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                 ReadFileTool(agentWorkspace),
                 WriteFileTool(agentWorkspace),
                 EditFileTool(agentWorkspace),
-                RecordMemoryCandidateTool(),
+                ManageMemoryTool(memoryRepository),
                 ManagePromptsTool(promptRepository)
             )
         )
@@ -462,6 +462,10 @@ private fun buildAgentMessages(
         你是运行在智能体（Agent）模式下的 AgentChat。
         你可以通过调用可用的工具来协助用户完成任务。
         如果用户要求新增、查询、修改、删除、分类、导入或导出提示词，请使用 manage_prompts 工具操作本机提示词库。
+        如果用户明确要求你“记一下、保存、收藏、记录”某个信息、笔记、偏好或事实，请使用 manage_memory 工具的 create 操作保存到本机记忆库。
+        如果用户询问之前保存过的内容、偏好或事实，请使用 manage_memory 工具的 search/list 操作查询本机记忆库，不要只依赖当前对话上下文猜测。
+        记忆是通用文本，不要把网址、账号、地址等内容拆成特殊字段；把用户想保存的完整信息放在 content 中。
+        如果要保存的信息是网址或包含网址，请把网址写在 content 里，并同时保留 Markdown 链接和原始网址，例如：[我的博客](https://example.com)\n原始链接：https://example.com。
         如果需要使用工具，请直接进行工具调用。
         如果不需要使用工具，或者在获得工具返回的结果后，请直接给出最终的回答。
         请务必使用中文进行回复。

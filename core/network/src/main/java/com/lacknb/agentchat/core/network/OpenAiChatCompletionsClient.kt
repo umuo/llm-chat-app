@@ -1,5 +1,6 @@
 package com.lacknb.agentchat.core.network
 
+import android.util.Log
 import com.lacknb.agentchat.core.model.ProviderProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -11,6 +12,8 @@ import java.io.BufferedReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+
+private const val NetworkLogTag = "AgentChatNetwork"
 
 class OpenAiChatCompletionsClient : ChatCompletionsClient {
 
@@ -35,7 +38,9 @@ class OpenAiChatCompletionsClient : ChatCompletionsClient {
             }
 
             if (connection.responseCode !in 200..299) {
-                emit(ChatCompletionStreamEvent.Failed("HTTP ${connection.responseCode}: ${connection.responseMessage}"))
+                val message = buildHttpErrorMessage(connection)
+                Log.w(NetworkLogTag, message)
+                emit(ChatCompletionStreamEvent.Failed(message))
                 return@flow
             }
 
@@ -68,11 +73,40 @@ class OpenAiChatCompletionsClient : ChatCompletionsClient {
                 }
             }
         } catch (error: Throwable) {
-            emit(ChatCompletionStreamEvent.Failed("Chat Completions request failed", error))
+            val message = buildRequestFailureMessage(error)
+            Log.e(NetworkLogTag, message, error)
+            emit(ChatCompletionStreamEvent.Failed(message, error))
         } finally {
             connection.disconnect()
         }
     }.flowOn(Dispatchers.IO)
+}
+
+private fun buildHttpErrorMessage(connection: HttpURLConnection): String {
+    val statusLine = "HTTP ${connection.responseCode}: ${connection.responseMessage}"
+    val responseBody = runCatching {
+        connection.errorStream
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.use { it.readText() }
+            ?.trim()
+            ?.take(1_200)
+    }.getOrNull()
+
+    return if (responseBody.isNullOrBlank()) {
+        statusLine
+    } else {
+        "$statusLine\n$responseBody"
+    }
+}
+
+private fun buildRequestFailureMessage(error: Throwable): String {
+    val type = error::class.java.simpleName.ifBlank { "Throwable" }
+    val detail = error.message?.takeIf { it.isNotBlank() }
+    return if (detail == null) {
+        "Chat Completions request failed: $type"
+    } else {
+        "Chat Completions request failed: $type: $detail"
+    }
 }
 
 private fun ChatCompletionRequest.toJson(): JSONObject {

@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
@@ -86,14 +85,7 @@ fun MemoryManagementRoute(
     val allMemories by repository.memories.collectAsState(initial = emptyList())
 
     fun copyMemory(memory: MemoryItem) {
-        val text = buildString {
-            if (!memory.url.isNullOrBlank()) {
-                append(memory.url)
-                append("\n\n")
-            }
-            append(memory.content)
-        }
-        clipboardManager.setText(AnnotatedString(text))
+        clipboardManager.setText(AnnotatedString(memory.content))
         status = "已复制「${memory.title}」"
     }
 
@@ -162,7 +154,7 @@ fun MemoryManagementRoute(
                 leadingIcon = {
                     Icon(Icons.Filled.Search, contentDescription = null)
                 },
-                label = { Text("搜索标题、内容、网址或标签") },
+                label = { Text("搜索标题、内容或标签") },
             )
 
             LazyRow(
@@ -219,7 +211,7 @@ fun MemoryManagementRoute(
         MemoryEditorDialog(
             memory = editorMemory,
             onDismiss = { showEditor = false },
-            onSave = { title, content, url, type, tags, sensitivity ->
+            onSave = { title, content, type, tags, sensitivity ->
                 scope.launch {
                     status = runCatching {
                         val current = editorMemory
@@ -227,7 +219,6 @@ fun MemoryManagementRoute(
                             repository.createMemory(
                                 title = title,
                                 content = content,
-                                url = url,
                                 type = type,
                                 tags = tags,
                                 sensitivity = sensitivity,
@@ -238,7 +229,6 @@ fun MemoryManagementRoute(
                                 id = current.id,
                                 title = title,
                                 content = content,
-                                url = url,
                                 type = type,
                                 tags = tags,
                                 sensitivity = sensitivity,
@@ -423,26 +413,6 @@ private fun MemoryRow(
                     Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
                 }
             }
-            memory.url?.let { url ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Filled.Link,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = url,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
             Text(
                 text = memory.content,
                 style = MaterialTheme.typography.bodyMedium,
@@ -500,13 +470,6 @@ private fun MemoryPreviewDialog(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    memory.url?.let { url ->
-                        Text(
-                            text = url,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
                     Text(
                         text = memory.content,
                         style = MaterialTheme.typography.bodyMedium,
@@ -563,7 +526,6 @@ private fun MemoryEditorDialog(
     onSave: (
         title: String,
         content: String,
-        url: String?,
         type: MemoryType,
         tags: List<String>,
         sensitivity: MemorySensitivity,
@@ -571,7 +533,6 @@ private fun MemoryEditorDialog(
 ) {
     var title by rememberSaveable(memory?.id) { mutableStateOf(memory?.title.orEmpty()) }
     var content by rememberSaveable(memory?.id) { mutableStateOf(memory?.content.orEmpty()) }
-    var url by rememberSaveable(memory?.id) { mutableStateOf(memory?.url.orEmpty()) }
     var tagsText by rememberSaveable(memory?.id) { mutableStateOf(memory?.tags.orEmpty().joinToString(", ")) }
     var type by rememberSaveable(memory?.id) { mutableStateOf(memory?.type ?: MemoryType.Note) }
     var sensitivity by rememberSaveable(memory?.id) { mutableStateOf(memory?.sensitivity ?: MemorySensitivity.Low) }
@@ -590,14 +551,6 @@ private fun MemoryEditorDialog(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("标题") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text("网址") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp),
@@ -656,7 +609,6 @@ private fun MemoryEditorDialog(
                     onSave(
                         title,
                         content,
-                        url.takeIf { it.isNotBlank() },
                         type,
                         tagsText.split(",", "，", "、").map { it.trim() }.filter { it.isNotBlank() },
                         sensitivity,

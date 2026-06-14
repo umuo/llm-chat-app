@@ -2,7 +2,6 @@ package com.lacknb.agentchat.core.memory
 
 enum class MemoryType(val displayName: String) {
     Note("笔记"),
-    Url("网址"),
     Preference("偏好"),
     Fact("事实"),
 }
@@ -22,7 +21,6 @@ data class MemoryItem(
     val id: String,
     val title: String,
     val content: String,
-    val url: String?,
     val type: MemoryType,
     val tags: List<String>,
     val source: MemorySource,

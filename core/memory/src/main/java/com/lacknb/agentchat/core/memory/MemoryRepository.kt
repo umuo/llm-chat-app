@@ -23,10 +23,37 @@ class MemoryRepository(context: Context) {
         }
     }
 
+    suspend fun searchMemories(
+        query: String,
+        type: MemoryType? = null,
+        limit: Int = 20,
+    ): List<MemoryItem> = withContext(Dispatchers.IO) {
+        val normalizedQuery = query.trim().takeIf { it.isNotBlank() }
+        val resultLimit = limit.coerceIn(1, 100)
+        if (normalizedQuery == null) {
+            return@withContext dao.search(query = null, type = type?.name, limit = resultLimit)
+                .map { it.toMemoryItem() }
+        }
+
+        val queryTokens = normalizedQuery.searchTokens()
+        val candidates = dao.search(query = null, type = type?.name, limit = 200)
+            .map { it.toMemoryItem() }
+        candidates
+            .mapNotNull { memory ->
+                val score = memory.matchScore(normalizedQuery, queryTokens)
+                if (score > 0) memory to score else null
+            }
+            .sortedWith(
+                compareByDescending<Pair<MemoryItem, Int>> { it.second }
+                    .thenByDescending { it.first.updatedAtMillis },
+            )
+            .take(resultLimit)
+            .map { it.first }
+    }
+
     suspend fun createMemory(
         title: String,
         content: String,
-        url: String?,
         type: MemoryType,
         tags: List<String>,
         sensitivity: MemorySensitivity = MemorySensitivity.Low,
@@ -39,9 +66,8 @@ class MemoryRepository(context: Context) {
         val now = System.currentTimeMillis()
         val item = MemoryItem(
             id = newMemoryId(),
-            title = title.normalizedTitle(normalizedContent, url),
+            title = title.normalizedTitle(normalizedContent),
             content = normalizedContent,
-            url = url?.trim()?.takeIf { it.isNotBlank() },
             type = type,
             tags = tags.distinctTags(),
             source = source,
@@ -60,7 +86,6 @@ class MemoryRepository(context: Context) {
         id: String,
         title: String,
         content: String,
-        url: String?,
         type: MemoryType,
         tags: List<String>,
         sensitivity: MemorySensitivity,
@@ -70,9 +95,8 @@ class MemoryRepository(context: Context) {
         require(normalizedContent.isNotBlank()) { "记忆内容不能为空" }
 
         val updated = current.copy(
-            title = title.normalizedTitle(normalizedContent, url),
+            title = title.normalizedTitle(normalizedContent),
             content = normalizedContent,
-            url = url?.trim()?.takeIf { it.isNotBlank() },
             type = type,
             tags = tags.distinctTags(),
             sensitivity = sensitivity,
@@ -91,14 +115,40 @@ class MemoryRepository(context: Context) {
         dao.delete(entity)
     }
 
-    private fun String.normalizedTitle(content: String, url: String?): String {
+    private fun String.normalizedTitle(content: String): String {
         val title = trim()
         if (title.isNotBlank()) return title
-        val urlTitle = url?.trim()?.removePrefix("https://")?.removePrefix("http://")?.takeIf { it.isNotBlank() }
-        return urlTitle ?: content.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(32) ?: "未命名记忆"
+        return content.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(32) ?: "未命名记忆"
     }
 
     private fun newMemoryId(): String {
         return "memory-${System.currentTimeMillis()}-${(1000..9999).random()}"
+    }
+
+    private fun String.searchTokens(): List<String> {
+        return lowercase()
+            .split(Regex("""[\s,，。.;；:：/\\|#]+"""))
+            .map { it.trim() }
+            .filter { it.length >= 2 }
+            .distinct()
+    }
+
+    private fun MemoryItem.matchScore(query: String, tokens: List<String>): Int {
+        val searchableText = buildString {
+            append(title)
+            append('\n')
+            append(content)
+            append('\n')
+            append(tags.joinToString(" "))
+            append('\n')
+            append(type.displayName)
+        }.lowercase()
+        val normalizedQuery = query.lowercase()
+        var score = 0
+        if (searchableText.contains(normalizedQuery)) score += 8
+        tokens.forEach { token ->
+            if (searchableText.contains(token)) score += 3
+        }
+        return score
     }
 }
