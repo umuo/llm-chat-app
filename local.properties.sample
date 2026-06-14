@@ -1,0 +1,5 @@
+sdk.dir=/Users/gitsilence/Library/Android/sdk
+agentchat.release.storeFile=keystore/agentchat-release.jks
+agentchat.release.storePassword=xxx
+agentchat.release.keyAlias=xxx
+agentchat.release.keyPassword=asasd

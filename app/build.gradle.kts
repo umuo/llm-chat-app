@@ -1,3 +1,26 @@
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun localProperty(name: String): String? =
+    localProperties.getProperty(name)?.trim()?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = localProperty("agentchat.release.storeFile")
+val releaseStorePassword = localProperty("agentchat.release.storePassword")
+val releaseKeyAlias = localProperty("agentchat.release.keyAlias")
+val releaseKeyPassword = localProperty("agentchat.release.keyPassword")
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { it != null }
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,6 +36,25 @@ android {
         targetSdk = 33
         versionCode = 1
         versionName = "0.1.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
     }
 
     buildFeatures {

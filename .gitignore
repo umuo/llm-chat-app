@@ -5,6 +5,9 @@ local.properties
 *.apk
 *.aab
 *.ap_
+*.jks
+*.keystore
+keystore/
 
 .DS_Store
 .idea/
