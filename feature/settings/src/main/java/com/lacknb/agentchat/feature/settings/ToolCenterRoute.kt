@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,10 +48,13 @@ import com.lacknb.agentchat.core.model.ProviderSettings
 fun ToolCenterRoute(
     settings: ProviderSettings,
     onBackToChat: () -> Unit,
-    onSaveMcpUrl: (String) -> Unit
+    onSaveMcpUrl: (String) -> Unit,
+    onSaveTavilyApiKey: (String) -> Unit
 ) {
     var mcpServerUrl by rememberSaveable(settings.mcpServerUrl) { mutableStateOf(settings.mcpServerUrl) }
-    var saveStatus by remember { mutableStateOf("") }
+    var tavilyApiKey by rememberSaveable(settings.tavilyApiKey) { mutableStateOf(settings.tavilyApiKey) }
+    var mcpSaveStatus by remember { mutableStateOf("") }
+    var tavilySaveStatus by remember { mutableStateOf("") }
     var showPreviewDialog by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
@@ -125,7 +129,7 @@ fun ToolCenterRoute(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = saveStatus,
+                            text = mcpSaveStatus,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f)
@@ -144,7 +148,7 @@ fun ToolCenterRoute(
                             Button(
                                 onClick = {
                                     onSaveMcpUrl(mcpServerUrl)
-                                    saveStatus = "已保存，后台将自动重连"
+                                    mcpSaveStatus = "已保存 MCP 配置"
                                 },
                                 shape = RoundedCornerShape(8.dp)
                             ) {
@@ -160,6 +164,69 @@ fun ToolCenterRoute(
                     mcpUrl = mcpServerUrl,
                     onDismiss = { showPreviewDialog = false }
                 )
+            }
+
+            // Tavily Configuration Section
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Tavily Web Search",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "联网搜索 (Tavily)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Text(
+                        text = "配置 Tavily API 密钥，使智能体能够实时检索全网最新资讯。请在 tavily.com 免费申请。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = tavilyApiKey,
+                        onValueChange = { tavilyApiKey = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("API Key") },
+                        placeholder = { Text("tvly-...") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = tavilySaveStatus,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                onSaveTavilyApiKey(tavilyApiKey)
+                                tavilySaveStatus = "已保存 Tavily 配置"
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("保存配置")
+                        }
+                    }
+                }
             }
 
             // Skills Section

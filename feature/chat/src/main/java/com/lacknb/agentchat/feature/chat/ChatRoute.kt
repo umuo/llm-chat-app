@@ -121,12 +121,14 @@ fun ChatRoute(
     onOpenToolCenter: () -> Unit,
     onSendMessage: suspend (
         messages: List<ChatMessage>,
+        useWebSearch: Boolean,
         onDelta: (String) -> Unit,
         onToolCallDelta: (ChatToolCall) -> Unit,
     ) -> Result<Unit>,
     onRunAgent: suspend (
         goal: String,
         history: List<ChatMessage>,
+        useWebSearch: Boolean,
         onEvent: (AgentEvent) -> Unit,
         onDelta: (String) -> Unit,
         onToolCallDelta: (ChatToolCall) -> Unit,
@@ -138,6 +140,7 @@ fun ChatRoute(
     var currentConversationId by rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var showHistoryDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
     var showParamsSheet by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var useWebSearch by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var historySummaries by remember { androidx.compose.runtime.mutableStateOf(historyManager.getSummaries()) }
 
     val scope = rememberCoroutineScope()
@@ -300,6 +303,7 @@ fun ChatRoute(
             val result = if (selectedMode == ChatMode.Chat) {
                 onSendMessage(
                     messages.toList(),
+                    useWebSearch,
                     { delta ->
                         messages.updateMessage(assistantId) { message ->
                             message.copy(content = message.content + delta)
@@ -315,6 +319,7 @@ fun ChatRoute(
                 onRunAgent(
                     finalContent,
                     messages.toList(),
+                    useWebSearch,
                     { event ->
                         agentEventsByMessage[assistantId] = agentEventsByMessage[assistantId].orEmpty() + event
                     },
@@ -528,6 +533,14 @@ fun ChatRoute(
                             resetConversation()
                         }
                         selectedMode = it 
+                    },
+                    useWebSearch = useWebSearch,
+                    onUseWebSearchChange = { enabled ->
+                        if (enabled && providerSettings.tavilyApiKey.isBlank()) {
+                            android.widget.Toast.makeText(context, "请先在工具中心配置 Tavily API Key", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            useWebSearch = enabled
+                        }
                     },
                     isSending = isSending,
                     onSend = ::sendMessage,
@@ -777,12 +790,15 @@ private fun EmptyConversation(
     }
 }
 
+@kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun ComposerBar(
     input: String,
     onInputChange: (String) -> Unit,
     selectedMode: ChatMode,
     onModeSelected: (ChatMode) -> Unit,
+    useWebSearch: Boolean,
+    onUseWebSearchChange: (Boolean) -> Unit,
     isSending: Boolean,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -806,10 +822,26 @@ private fun ComposerBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ModeSelector(
-                    selectedMode = selectedMode,
-                    onModeSelected = onModeSelected,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ModeSelector(
+                        selectedMode = selectedMode,
+                        onModeSelected = onModeSelected,
+                    )
+                    
+                    androidx.compose.material3.FilterChip(
+                        selected = useWebSearch,
+                        onClick = { onUseWebSearchChange(!useWebSearch) },
+                        label = { Text("🌐 联网搜索") },
+                        colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                }
+
                 IconButton(onClick = onOpenParams) {
                     Icon(
                         imageVector = Icons.Filled.Settings,

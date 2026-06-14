@@ -61,6 +61,13 @@ class ProviderRepository(
         _settings.value = loadSettings()
     }
 
+    fun saveTavilyApiKey(apiKey: String) {
+        prefs.edit()
+            .putString(KeyTavilyApiKey, apiKey.trim())
+            .apply()
+        _settings.value = loadSettings()
+    }
+
     fun saveLlmParameters(temperature: Float, topP: Float, topK: Int, maxTokens: Int) {
         prefs.edit()
             .putFloat(KeyTemperature, temperature)
@@ -108,6 +115,7 @@ class ProviderRepository(
             hasApiKey = hasApiKey,
             maskedApiKey = if (hasApiKey) "••••" else "",
             mcpServerUrl = prefs.getString(KeyMcpServerUrl, "") ?: "",
+            tavilyApiKey = prefs.getString(KeyTavilyApiKey, "") ?: "",
             temperature = prefs.getFloat(KeyTemperature, 0.7f),
             topP = prefs.getFloat(KeyTopP, 0.95f),
             topK = prefs.getInt(KeyTopK, 40),
@@ -124,6 +132,7 @@ class ProviderRepository(
         const val KeyRetrievalMode = "retrieval_mode"
         const val KeyHasApiKey = "has_api_key"
         const val KeyMcpServerUrl = "mcp_server_url"
+        const val KeyTavilyApiKey = "tavily_api_key"
         const val KeyTemperature = "llm_temperature"
         const val KeyTopP = "llm_top_p"
         const val KeyTopK = "llm_top_k"

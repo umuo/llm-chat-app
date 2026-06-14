@@ -169,22 +169,24 @@ private fun AgentChatApp(
                 onOpenPrompts = { navController.navigate(TopLevelDestination.Prompts.route) },
                 onOpenMemory = { navController.navigate(TopLevelDestination.Memory.route) },
                 onOpenToolCenter = { navController.navigate(TopLevelDestination.ToolCenter.route) },
-                onSendMessage = { messages, onDelta, onToolCallDelta ->
+                onSendMessage = { messages, useWebSearch, onDelta, onToolCallDelta ->
                     streamChatCompletion(
                         providerRepository = providerRepository,
                         chatClient = chatClient,
                         messages = messages,
+                        useWebSearch = useWebSearch,
                         onDelta = onDelta,
                         onToolCallDelta = onToolCallDelta,
                     )
                 },
-                onRunAgent = { goal, history, onEvent, onDelta, onToolCallDelta ->
+                onRunAgent = { goal, history, useWebSearch, onEvent, onDelta, onToolCallDelta ->
                     runAgentChatCompletion(
                         providerRepository = providerRepository,
                         chatClient = chatClient,
                         toolRegistry = toolRegistry,
                         goal = goal,
                         history = history,
+                        useWebSearch = useWebSearch,
                         onEvent = onEvent,
                         onDelta = onDelta,
                         onToolCallDelta = onToolCallDelta,
@@ -224,7 +226,8 @@ private fun AgentChatApp(
             ToolCenterRoute(
                 settings = providerSettings,
                 onBackToChat = { navController.popBackStack() },
-                onSaveMcpUrl = providerRepository::saveMcpUrl
+                onSaveMcpUrl = providerRepository::saveMcpUrl,
+                onSaveTavilyApiKey = providerRepository::saveTavilyApiKey
             )
         }
         composable(TopLevelDestination.Prompts.route) {
@@ -242,6 +245,7 @@ private suspend fun runAgentChatCompletion(
     toolRegistry: ToolRegistry,
     goal: String,
     history: List<ChatMessage>,
+    useWebSearch: Boolean = false,
     onEvent: (AgentEvent) -> Unit,
     onDelta: (String) -> Unit,
     onToolCallDelta: (ChatToolCall) -> Unit,
@@ -250,7 +254,6 @@ private suspend fun runAgentChatCompletion(
     val apiKey = providerRepository.currentApiKey()
         ?: error("API 密钥未配置")
     var eventIndex = 0
-    val conversation = buildAgentMessages(goal, history).toMutableList()
 
     fun emitEvent(
         type: AgentEventType,
@@ -269,6 +272,40 @@ private suspend fun runAgentChatCompletion(
             ),
         )
     }
+
+    var finalGoal = goal
+    val tavilyApiKey = providerRepository.settings.value.tavilyApiKey
+    if (useWebSearch && tavilyApiKey.isNotBlank()) {
+        emitEvent(
+            type = AgentEventType.Action,
+            summary = "模型请求工具：联网检索 (Tavily)",
+            payloadJson = "{\n  \"query\": \"$goal\"\n}"
+        )
+        try {
+            val tavilyClient = com.lacknb.agentchat.core.network.TavilyClient()
+            val searchResult = tavilyClient.search(tavilyApiKey, goal)
+            if (searchResult.context.isNotBlank()) {
+                finalGoal = "这是最新的网络检索资料：\n\n${searchResult.context}\n\n请结合上述资料回答我的问题：\n$goal"
+                val refList = searchResult.references.mapIndexed { index, ref -> "  ${index + 1}. ${ref.title} (${ref.url})" }.joinToString("\n")
+                val observationSummary = if (searchResult.references.isNotEmpty()) "获取到最新网络资料，参考了以下来源：\n$refList" else "获取到最新网络资料"
+                emitEvent(
+                    type = AgentEventType.Observation,
+                    summary = "工具运行结束：联网检索 (Tavily)",
+                    payloadJson = observationSummary
+                )
+            }
+        } catch (e: Exception) {
+            emitEvent(
+                type = AgentEventType.Observation,
+                summary = "联网检索失败: ${e.message}",
+                riskLevel = RiskLevel.High
+            )
+        }
+    }
+
+    val conversation = buildAgentMessages(finalGoal, history).toMutableList()
+
+
 
     emitEvent(
         type = AgentEventType.Plan,
@@ -497,6 +534,7 @@ private suspend fun streamChatCompletion(
     providerRepository: ProviderRepository,
     chatClient: ChatCompletionsClient,
     messages: List<ChatMessage>,
+    useWebSearch: Boolean = false,
     onDelta: (String) -> Unit,
     onToolCallDelta: (ChatToolCall) -> Unit = {},
 ): Result<Unit> = runCatching {
@@ -504,9 +542,35 @@ private suspend fun streamChatCompletion(
     val apiKey = providerRepository.currentApiKey()
         ?: error("API 密钥未配置")
 
+    var finalMessages = messages.toMutableList()
+    val tavilyApiKey = providerRepository.settings.value.tavilyApiKey
+    if (useWebSearch && tavilyApiKey.isNotBlank()) {
+        val lastUserMessageIndex = finalMessages.indexOfLast { it.role == MessageRole.User }
+        if (lastUserMessageIndex >= 0) {
+            val userMsg = finalMessages[lastUserMessageIndex]
+            onDelta("*(正在检索网络最新资料...)*\n\n")
+            try {
+                val tavilyClient = com.lacknb.agentchat.core.network.TavilyClient()
+                val searchResult = tavilyClient.search(tavilyApiKey, userMsg.content)
+                if (searchResult.context.isNotBlank()) {
+                    val enrichedContent = "这是最新的网络检索资料：\n\n${searchResult.context}\n\n请结合上述资料回答我的问题：\n${userMsg.content}"
+                    finalMessages[lastUserMessageIndex] = userMsg.copy(content = enrichedContent)
+                    if (searchResult.references.isNotEmpty()) {
+                        val refList = searchResult.references.mapIndexed { index, ref -> "${index + 1}. [${ref.title}](${ref.url})" }.joinToString("  \n")
+                        onDelta("*(参考了以下来源：  \n$refList)*\n\n")
+                    } else {
+                        onDelta("*(参考了 ${tavilyClient.javaClass.simpleName} 的检索结果)*\n\n")
+                    }
+                }
+            } catch (e: Exception) {
+                onDelta("*(联网检索失败: ${e.message})*\n\n")
+            }
+        }
+    }
+
     val request = ChatCompletionRequest(
         model = profile.defaultModel,
-        messages = messages
+        messages = finalMessages
             .filter { message ->
                 message.status != MessageStatus.Streaming &&
                     (message.content.isNotBlank() || message.imageUrls.isNotEmpty()) &&

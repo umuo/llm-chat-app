@@ -38,6 +38,7 @@ data class ProviderSettings(
     val hasApiKey: Boolean = false,
     val maskedApiKey: String = "",
     val mcpServerUrl: String = "",
+    val tavilyApiKey: String = "",
     val temperature: Float = 0.7f,
     val topP: Float = 0.95f,
     val topK: Int = 40,
