@@ -47,6 +47,7 @@ import com.lacknb.agentchat.feature.chat.ChatRoute
 import com.lacknb.agentchat.feature.memory.MemoryManagementRoute
 import com.lacknb.agentchat.feature.prompts.PromptManagementRoute
 import com.lacknb.agentchat.feature.settings.SettingsRoute
+import com.lacknb.agentchat.feature.settings.ToolCenterRoute
 import com.lacknb.agentchat.tool.ToolRegistry
 import com.lacknb.agentchat.tool.PlanAgentTool
 import com.lacknb.agentchat.tool.ReadFileTool
@@ -167,6 +168,7 @@ private fun AgentChatApp(
                 onOpenSettings = { navController.navigate(TopLevelDestination.Settings.route) },
                 onOpenPrompts = { navController.navigate(TopLevelDestination.Prompts.route) },
                 onOpenMemory = { navController.navigate(TopLevelDestination.Memory.route) },
+                onOpenToolCenter = { navController.navigate(TopLevelDestination.ToolCenter.route) },
                 onSendMessage = { messages, onDelta, onToolCallDelta ->
                     streamChatCompletion(
                         providerRepository = providerRepository,
@@ -215,6 +217,13 @@ private fun AgentChatApp(
                         apiKey = apiKey,
                     )
                 },
+            )
+        }
+        composable(TopLevelDestination.ToolCenter.route) {
+            ToolCenterRoute(
+                settings = providerSettings,
+                onBackToChat = { navController.popBackStack() },
+                onSaveMcpUrl = providerRepository::saveMcpUrl
             )
         }
         composable(TopLevelDestination.Prompts.route) {
@@ -588,4 +597,5 @@ private enum class TopLevelDestination(val route: String) {
     Memory(route = "memory"),
     Prompts(route = "prompts"),
     Settings(route = "settings"),
+    ToolCenter(route = "tool_center"),
 }

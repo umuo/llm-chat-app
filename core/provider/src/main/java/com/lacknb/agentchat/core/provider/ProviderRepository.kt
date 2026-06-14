@@ -25,7 +25,6 @@ class ProviderRepository(
         embeddingModel: String,
         rerankModel: String,
         retrievalMode: RetrievalMode,
-        mcpServerUrl: String,
     ): Result<Unit> = runCatching {
         val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
         val normalizedModel = model.trim()
@@ -49,10 +48,16 @@ class ProviderRepository(
             .putString(KeyEmbeddingModel, normalizedEmbeddingModel)
             .putString(KeyRerankModel, normalizedRerankModel)
             .putString(KeyRetrievalMode, retrievalMode.name)
-            .putString(KeyMcpServerUrl, mcpServerUrl.trim())
             .putBoolean(KeyHasApiKey, trimmedApiKey.isNotEmpty() || prefs.getBoolean(KeyHasApiKey, false))
             .apply()
 
+        _settings.value = loadSettings()
+    }
+
+    fun saveMcpUrl(mcpServerUrl: String) {
+        prefs.edit()
+            .putString(KeyMcpServerUrl, mcpServerUrl.trim())
+            .apply()
         _settings.value = loadSettings()
     }
 
