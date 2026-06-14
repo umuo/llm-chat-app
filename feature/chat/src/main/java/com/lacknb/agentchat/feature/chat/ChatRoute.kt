@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Message
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -367,6 +368,99 @@ fun ChatRoute(
         }
     }
 
+    fun regenerateMessage(assistantMessageId: String) {
+        val index = messages.indexOfFirst { it.id == assistantMessageId }
+        if (index == -1 || isSending) return
+
+        val previousUserMessage = messages.subList(0, index).lastOrNull { it.role == MessageRole.User } ?: return
+
+        messages.removeRange(index, messages.size)
+
+        val newAssistantId = "assistant-${System.currentTimeMillis()}"
+        messages += ChatMessage(
+            id = newAssistantId,
+            role = MessageRole.Assistant,
+            content = "",
+            status = MessageStatus.Streaming,
+        )
+        isSending = true
+
+        val savedId = historyManager.saveConversation(
+            currentConversationId,
+            selectedMode,
+            messages.toList(),
+            agentEventsByMessage.toMap()
+        )
+        currentConversationId = savedId
+
+        currentJob = scope.launch {
+            val result = if (selectedMode == ChatMode.Chat) {
+                onSendMessage(
+                    messages.toList(),
+                    useWebSearch,
+                    { delta ->
+                        messages.updateMessage(newAssistantId) { message ->
+                            message.copy(content = message.content + delta)
+                        }
+                    },
+                    { toolDelta ->
+                        messages.updateMessage(newAssistantId) { message ->
+                            message.copy(toolCalls = message.toolCalls.merge(toolDelta))
+                        }
+                    },
+                )
+            } else {
+                onRunAgent(
+                    previousUserMessage.content,
+                    messages.toList(),
+                    useWebSearch,
+                    { event ->
+                        agentEventsByMessage[newAssistantId] = agentEventsByMessage[newAssistantId].orEmpty() + event
+                    },
+                    { delta ->
+                        messages.updateMessage(newAssistantId) { message ->
+                            message.copy(content = message.content + delta)
+                        }
+                    },
+                    { toolDelta ->
+                        messages.updateMessage(newAssistantId) { message ->
+                            message.copy(toolCalls = message.toolCalls.merge(toolDelta))
+                        }
+                    },
+                )
+            }
+
+            messages.updateMessage(newAssistantId) { message ->
+                result.fold(
+                    onSuccess = {
+                        message.copy(
+                            content = message.content.ifBlank {
+                                if (message.toolCalls.isNotEmpty()) "已请求工具调用。" else "完成。"
+                            },
+                            status = MessageStatus.Complete,
+                        )
+                    },
+                    onFailure = { error ->
+                        message.copy(
+                            content = message.content.ifBlank { error.message ?: "请求失败" },
+                            status = MessageStatus.Failed,
+                        )
+                    }
+                )
+            }
+            isSending = false
+            currentJob = null
+
+            val finalSavedId = historyManager.saveConversation(
+                currentConversationId,
+                selectedMode,
+                messages.toList(),
+                agentEventsByMessage.toMap()
+            )
+            currentConversationId = finalSavedId
+        }
+    }
+
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     ModalNavigationDrawer(
@@ -598,6 +692,7 @@ fun ChatRoute(
                         MessageRow(
                             message = message,
                             agentEvents = agentEventsByMessage[message.id].orEmpty(),
+                            onRegenerate = { regenerateMessage(message.id) },
                         )
                     }
                     // Invisible anchor item at the bottom. Auto-scroll targets this item
@@ -1024,6 +1119,7 @@ private fun MessageRow(
     message: ChatMessage,
     agentEvents: List<AgentEvent>,
     modifier: Modifier = Modifier,
+    onRegenerate: () -> Unit = {},
 ) {
     val isUser = message.role == MessageRole.User
     Row(
@@ -1045,6 +1141,7 @@ private fun MessageRow(
                     .weight(1f)
                     .widthIn(max = 720.dp)
             },
+            onRegenerate = onRegenerate,
         )
     }
 }
@@ -1080,6 +1177,7 @@ private fun MessageContent(
     message: ChatMessage,
     agentEvents: List<AgentEvent>,
     modifier: Modifier = Modifier,
+    onRegenerate: () -> Unit = {},
 ) {
     val isUser = message.role == MessageRole.User
     val contentColor = when {
@@ -1108,6 +1206,23 @@ private fun MessageContent(
                 }
                 if (message.attachments.isNotEmpty()) {
                     MessageAttachments(attachments = message.attachments)
+                }
+                if (!isUser && message.status == MessageStatus.Failed) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        androidx.compose.material3.IconButton(
+                            onClick = onRegenerate,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "重新生成",
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1144,6 +1259,18 @@ private fun MessageContent(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+                androidx.compose.material3.IconButton(
+                    onClick = onRegenerate,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "重新生成",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
