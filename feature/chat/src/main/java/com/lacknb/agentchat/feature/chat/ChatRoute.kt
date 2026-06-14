@@ -89,6 +89,13 @@ import com.lacknb.agentchat.core.model.MessageRole
 import com.lacknb.agentchat.core.model.MessageStatus
 import com.lacknb.agentchat.core.model.ProviderSettings
 import kotlinx.coroutines.delay
+
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -177,35 +184,35 @@ fun ChatRoute(
     var isSending by rememberSaveableMutableState(false)
     var currentJob by remember { androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-    var programmaticScrollCount by remember { androidx.compose.runtime.mutableStateOf(0) }
-    val isProgrammaticScrolling by remember {
-        androidx.compose.runtime.derivedStateOf { programmaticScrollCount > 0 }
-    }
     var shouldAutoScroll by remember { androidx.compose.runtime.mutableStateOf(true) }
+    // Track whether the user's finger is physically touching the list.
+    var userIsTouching by remember { androidx.compose.runtime.mutableStateOf(false) }
 
-    LaunchedEffect(listState.isScrollInProgress, listState.canScrollForward, isProgrammaticScrolling) {
-        if (!listState.canScrollForward) {
-            shouldAutoScroll = true
-        } else if (listState.isScrollInProgress && !isProgrammaticScrolling) {
-            shouldAutoScroll = false
+    // When user lifts finger, wait for fling to settle, then decide:
+    // - If the last message is visible → user scrolled back to bottom → re-enable auto-scroll
+    // - If not → user is reading history → keep auto-scroll off
+    var hasUserTouched by remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(userIsTouching) {
+        if (userIsTouching) {
+            hasUserTouched = true
+        } else if (hasUserTouched) {
+            // Wait for fling/inertial scroll to finish
+            if (listState.isScrollInProgress) {
+                snapshotFlow { listState.isScrollInProgress }.first { !it }
+            }
+            // Check if the last message (or anchor) is visible
+            val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            shouldAutoScroll = messages.isEmpty() || lastVisibleIndex >= messages.lastIndex
         }
     }
 
-    var lastMessagesSize by remember { androidx.compose.runtime.mutableStateOf(0) }
-
+    // Auto-scroll: fires on every content change (new message or streaming token).
+    // Scrolls to the invisible anchor item placed after all messages in the LazyColumn.
     LaunchedEffect(messages.size, messages.lastOrNull()?.content, messages.lastOrNull()?.toolCalls) {
-        if (messages.isNotEmpty()) {
-            val sizeChanged = messages.size != lastMessagesSize
-            lastMessagesSize = messages.size
-            if (sizeChanged || shouldAutoScroll) {
-                try {
-                    programmaticScrollCount++
-                    listState.animateScrollToItem(messages.lastIndex)
-                } catch (e: Exception) {
-                    // Ignored
-                } finally {
-                    programmaticScrollCount--
-                }
+        if (messages.isNotEmpty() && shouldAutoScroll && !userIsTouching) {
+            try {
+                listState.scrollToItem(messages.size)
+            } catch (_: Exception) {
             }
         }
     }
@@ -562,7 +569,24 @@ fun ChatRoute(
 
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                // Wait for finger down on Initial pass (before scroll handler)
+                                awaitFirstDown(pass = PointerEventPass.Initial)
+                                userIsTouching = true
+                                shouldAutoScroll = false
+                                try {
+                                    // Wait until all fingers are lifted
+                                    do {
+                                        val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                                    } while (event.changes.any { it.pressed })
+                                } finally {
+                                    userIsTouching = false
+                                }
+                            }
+                        },
                     contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
@@ -572,6 +596,10 @@ fun ChatRoute(
                             agentEvents = agentEventsByMessage[message.id].orEmpty(),
                         )
                     }
+                    // Invisible anchor item at the bottom. Auto-scroll targets this item
+                    // so the LazyColumn scrolls far enough to reveal the bottom of the
+                    // last message as it grows during streaming.
+                    item(key = "_bottom_anchor") { }
                 }
             }
         }
