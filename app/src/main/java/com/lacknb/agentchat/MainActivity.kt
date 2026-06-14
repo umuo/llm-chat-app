@@ -248,8 +248,22 @@ private suspend fun runAgentChatCompletion(
     repeat(MaxAgentToolTurns) { turnIndex ->
         var emittedStreamingObservation = false
         val assistantContent = StringBuilder()
+        var emittedAssistantContentLength = 0
         val toolCalls = mutableListOf<ChatToolCall>()
         val announcedToolCallIndexes = mutableSetOf<Int>()
+
+        fun emitAssistantContentSegment() {
+            if (assistantContent.length <= emittedAssistantContentLength) return
+            val segment = assistantContent.substring(emittedAssistantContentLength)
+            emittedAssistantContentLength = assistantContent.length
+            if (segment.isNotBlank()) {
+                emitEvent(
+                    type = AgentEventType.Observation,
+                    summary = AgentTextSegmentSummary,
+                    payloadJson = segment,
+                )
+            }
+        }
 
         emitEvent(
             type = AgentEventType.Action,
@@ -284,6 +298,7 @@ private suspend fun runAgentChatCompletion(
                 }
                 is ChatCompletionStreamEvent.ToolCallDelta -> {
                     if (announcedToolCallIndexes.add(event.delta.index)) {
+                        emitAssistantContentSegment()
                         emitEvent(
                             type = AgentEventType.Action,
                             summary = "模型请求工具：${event.delta.functionName ?: "函数_${event.delta.index}"}",
@@ -317,6 +332,8 @@ private suspend fun runAgentChatCompletion(
             )
             return@runCatching
         }
+
+        emitAssistantContentSegment()
 
         conversation += ChatCompletionMessage(
             role = "assistant",
@@ -440,6 +457,7 @@ private suspend fun fetchProviderModels(
 }
 
 private const val MaxAgentToolTurns = 5
+private const val AgentTextSegmentSummary = "模型输出片段"
 
 private suspend fun streamChatCompletion(
     providerRepository: ProviderRepository,

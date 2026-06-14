@@ -1039,6 +1039,12 @@ private fun MessageContent(
         return
     }
 
+    val consumedAgentTextLength = agentEvents
+        .filter { it.summary == AgentTextSegmentSummary }
+        .sumOf { it.payloadJson.orEmpty().length }
+        .coerceAtMost(message.content.length)
+    val remainingAgentContent = message.content.drop(consumedAgentTextLength)
+
     Column(
         modifier = modifier.padding(top = 2.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1069,6 +1075,23 @@ private fun MessageContent(
         if (agentEvents.isNotEmpty()) {
             agentEvents.forEach { event ->
                 when (event.type) {
+                    AgentEventType.Observation -> {
+                        if (event.summary == AgentTextSegmentSummary) {
+                            val textSegment = event.payloadJson.orEmpty()
+                            if (textSegment.isNotBlank()) {
+                                MarkdownContent(
+                                    markdown = textSegment,
+                                    color = contentColor,
+                                )
+                            }
+                        } else if (event.summary.startsWith("工具运行结束：")) {
+                            val toolName = event.summary.substringAfter("工具运行结束：")
+                            ToolObservationBlock(
+                                toolName = toolName,
+                                result = event.payloadJson ?: ""
+                            )
+                        }
+                    }
                     AgentEventType.Action -> {
                         if (event.summary.startsWith("模型请求工具：")) {
                             val toolName = event.summary.substringAfter("模型请求工具：")
@@ -1082,15 +1105,6 @@ private fun MessageContent(
                             )
                         }
                     }
-                    AgentEventType.Observation -> {
-                        if (event.summary.startsWith("工具运行结束：")) {
-                            val toolName = event.summary.substringAfter("工具运行结束：")
-                            ToolObservationBlock(
-                                toolName = toolName,
-                                result = event.payloadJson ?: ""
-                            )
-                        }
-                    }
                     else -> {}
                 }
             }
@@ -1100,9 +1114,9 @@ private fun MessageContent(
             }
         }
 
-        if (message.content.isNotBlank()) {
+        if (remainingAgentContent.isNotBlank()) {
             MarkdownContent(
-                markdown = message.content,
+                markdown = remainingAgentContent,
                 color = contentColor,
             )
         } else if (message.status == MessageStatus.Streaming && agentEvents.none { it.type == AgentEventType.Observation && it.summary.startsWith("工具运行结束：") }) {
@@ -1110,6 +1124,8 @@ private fun MessageContent(
         }
     }
 }
+
+private const val AgentTextSegmentSummary = "模型输出片段"
 
 @Composable
 private fun ToolObservationBlock(
