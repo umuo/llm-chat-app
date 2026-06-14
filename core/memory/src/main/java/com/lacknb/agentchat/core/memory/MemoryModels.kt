@@ -17,6 +17,12 @@ enum class MemorySensitivity(val displayName: String) {
     High("高敏"),
 }
 
+enum class MemoryRetrievalMode {
+    Keyword,
+    Vector,
+    Hybrid,
+}
+
 data class MemoryItem(
     val id: String,
     val title: String,
@@ -26,6 +32,8 @@ data class MemoryItem(
     val source: MemorySource,
     val sensitivity: MemorySensitivity,
     val confidence: Float,
+    val embedding: List<Float>,
+    val embeddingModel: String?,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
     val lastAccessedAtMillis: Long?,

@@ -15,6 +15,23 @@ interface ChatCompletionsClient {
         apiKey: String,
         timeoutSeconds: Int = 30,
     ): Result<List<String>>
+
+    suspend fun createEmbedding(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        input: String,
+        timeoutSeconds: Int = 30,
+    ): Result<List<Float>>
+
+    suspend fun rerank(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        query: String,
+        documents: List<String>,
+        timeoutSeconds: Int = 30,
+    ): Result<List<Int>>
 }
 
 sealed interface ChatCompletionStreamEvent {

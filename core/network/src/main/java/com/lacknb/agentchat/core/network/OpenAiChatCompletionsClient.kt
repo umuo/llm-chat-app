@@ -60,6 +60,110 @@ class OpenAiChatCompletionsClient : ChatCompletionsClient {
         }
     }
 
+    override suspend fun createEmbedding(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        input: String,
+        timeoutSeconds: Int,
+    ): Result<List<Float>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val endpoint = baseUrl.trim().trimEnd('/') + "/embeddings"
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = timeoutSeconds * 1000
+                readTimeout = timeoutSeconds * 1000
+                doOutput = true
+                setRequestProperty("Authorization", "Bearer $apiKey")
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "application/json")
+            }
+
+            try {
+                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(
+                        JSONObject()
+                            .put("model", model)
+                            .put("input", input)
+                            .toString(),
+                    )
+                }
+
+                if (connection.responseCode !in 200..299) {
+                    val message = buildHttpErrorMessage(connection)
+                    Log.w(NetworkLogTag, message)
+                    throw EmbeddingException(message)
+                }
+
+                val responseBody = connection.inputStream
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+                JSONObject(responseBody).toEmbedding()
+            } catch (error: EmbeddingException) {
+                throw error
+            } catch (error: Throwable) {
+                val message = buildRequestFailureMessage("Embeddings request failed", error)
+                Log.e(NetworkLogTag, message, error)
+                throw IllegalStateException(message, error)
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    override suspend fun rerank(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        query: String,
+        documents: List<String>,
+        timeoutSeconds: Int,
+    ): Result<List<Int>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val endpoint = baseUrl.trim().trimEnd('/') + "/rerank"
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = timeoutSeconds * 1000
+                readTimeout = timeoutSeconds * 1000
+                doOutput = true
+                setRequestProperty("Authorization", "Bearer $apiKey")
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "application/json")
+            }
+
+            try {
+                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(
+                        JSONObject()
+                            .put("model", model)
+                            .put("query", query)
+                            .put("documents", JSONArray().apply { documents.forEach { put(it) } })
+                            .toString(),
+                    )
+                }
+
+                if (connection.responseCode !in 200..299) {
+                    val message = buildHttpErrorMessage(connection)
+                    Log.w(NetworkLogTag, message)
+                    throw RerankException(message)
+                }
+
+                val responseBody = connection.inputStream
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+                JSONObject(responseBody).toRerankOrder(documents.size)
+            } catch (error: RerankException) {
+                throw error
+            } catch (error: Throwable) {
+                val message = buildRequestFailureMessage("Rerank request failed", error)
+                Log.e(NetworkLogTag, message, error)
+                throw IllegalStateException(message, error)
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
     override fun streamChatCompletion(
         profile: ProviderProfile,
         apiKey: String,
@@ -126,6 +230,8 @@ class OpenAiChatCompletionsClient : ChatCompletionsClient {
 }
 
 private class ModelListException(message: String) : RuntimeException(message)
+private class EmbeddingException(message: String) : RuntimeException(message)
+private class RerankException(message: String) : RuntimeException(message)
 
 private fun buildHttpErrorMessage(connection: HttpURLConnection): String {
     val statusLine = "HTTP ${connection.responseCode}: ${connection.responseMessage}"
@@ -163,6 +269,44 @@ private fun JSONObject.toModelIds(): List<String> {
             if (id.isNotEmpty()) add(id)
         }
     }.distinct().sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
+}
+
+private fun JSONObject.toEmbedding(): List<Float> {
+    val data = optJSONArray("data") ?: JSONArray()
+    val first = data.optJSONObject(0) ?: error("Embedding response missing data[0]")
+    val embedding = first.optJSONArray("embedding") ?: error("Embedding response missing embedding")
+    return buildList {
+        for (index in 0 until embedding.length()) {
+            add(embedding.optDouble(index).toFloat())
+        }
+    }
+}
+
+private fun JSONObject.toRerankOrder(documentCount: Int): List<Int> {
+    val results = optJSONArray("results")
+        ?: optJSONArray("data")
+        ?: JSONArray()
+    val scored = buildList {
+        for (index in 0 until results.length()) {
+            val item = results.optJSONObject(index) ?: continue
+            val documentIndex = item.optInt("index", item.optInt("document_index", -1))
+            val relevanceScore = item.optDouble(
+                "relevance_score",
+                item.optDouble("score", Double.NaN),
+            )
+            if (documentIndex in 0 until documentCount) {
+                add(documentIndex to if (relevanceScore.isNaN()) 0.0 else relevanceScore)
+            }
+        }
+    }
+    return if (scored.isEmpty()) {
+        emptyList()
+    } else {
+        scored
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .distinct()
+    }
 }
 
 private fun ChatCompletionRequest.toJson(): JSONObject {

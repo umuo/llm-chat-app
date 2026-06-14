@@ -45,6 +45,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lacknb.agentchat.core.model.ProviderSettings
+import com.lacknb.agentchat.core.model.RetrievalMode
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,7 +53,14 @@ import kotlinx.coroutines.launch
 fun SettingsRoute(
     settings: ProviderSettings,
     onBackToChat: () -> Unit,
-    onSaveProvider: (baseUrl: String, apiKey: String, model: String) -> Result<Unit>,
+    onSaveProvider: (
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        embeddingModel: String,
+        rerankModel: String,
+        retrievalMode: RetrievalMode,
+    ) -> Result<Unit>,
     onTestConnection: suspend () -> Result<Unit>,
     onFetchModels: suspend (baseUrl: String, apiKey: String) -> Result<List<String>>,
 ) {
@@ -60,12 +68,29 @@ fun SettingsRoute(
     var baseUrl by rememberSaveable(settings.baseUrl) { androidx.compose.runtime.mutableStateOf(settings.baseUrl) }
     var apiKey by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var model by rememberSaveable(settings.model) { androidx.compose.runtime.mutableStateOf(settings.model) }
+    var embeddingModel by rememberSaveable(settings.embeddingModel) {
+        androidx.compose.runtime.mutableStateOf(settings.embeddingModel)
+    }
+    var rerankModel by rememberSaveable(settings.rerankModel) {
+        androidx.compose.runtime.mutableStateOf(settings.rerankModel)
+    }
+    var retrievalMode by rememberSaveable(settings.retrievalMode) {
+        androidx.compose.runtime.mutableStateOf(settings.retrievalMode)
+    }
     var isTesting by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var isLoadingModels by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var isModelPickerOpen by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var modelPickerTarget by rememberSaveable { androidx.compose.runtime.mutableStateOf(ModelPickerTarget.Chat) }
     var modelQuery by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var modelOptions by remember { androidx.compose.runtime.mutableStateOf<List<String>>(emptyList()) }
-    var status by rememberSaveable(settings.hasApiKey, settings.baseUrl, settings.model) {
+    var status by rememberSaveable(
+        settings.hasApiKey,
+        settings.baseUrl,
+        settings.model,
+        settings.embeddingModel,
+        settings.rerankModel,
+        settings.retrievalMode,
+    ) {
         androidx.compose.runtime.mutableStateOf(
             if (settings.hasApiKey) {
                 "已保存 · ${settings.model}"
@@ -78,11 +103,20 @@ fun SettingsRoute(
     if (isModelPickerOpen) {
         ModelPickerDialog(
             models = modelOptions,
-            selectedModel = model,
+            target = modelPickerTarget,
+            selectedModel = when (modelPickerTarget) {
+                ModelPickerTarget.Chat -> model
+                ModelPickerTarget.Embedding -> embeddingModel
+                ModelPickerTarget.Rerank -> rerankModel
+            },
             query = modelQuery,
             onQueryChange = { modelQuery = it },
             onSelect = { selectedModel ->
-                model = selectedModel
+                when (modelPickerTarget) {
+                    ModelPickerTarget.Chat -> model = selectedModel
+                    ModelPickerTarget.Embedding -> embeddingModel = selectedModel
+                    ModelPickerTarget.Rerank -> rerankModel = selectedModel
+                }
                 isModelPickerOpen = false
                 status = "已选择模型 · $selectedModel"
             },
@@ -170,49 +204,75 @@ fun SettingsRoute(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        OutlinedTextField(
+                        ModelTextField(
                             value = model,
                             onValueChange = { model = it },
+                            label = "聊天模型",
                             modifier = Modifier.weight(1f),
-                            label = { Text("模型") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
                         )
-                        FilledTonalButton(
+                        FetchModelsButton(
+                            isLoading = isLoadingModels,
                             onClick = {
+                                modelPickerTarget = ModelPickerTarget.Chat
                                 isLoadingModels = true
                                 status = "正在获取模型..."
                                 scope.launch {
-                                    status = onFetchModels(baseUrl, apiKey)
-                                        .fold(
-                                            onSuccess = { models ->
-                                                modelOptions = models
-                                                modelQuery = ""
-                                                isModelPickerOpen = true
-                                                "已获取 ${models.size} 个模型"
-                                            },
-                                            onFailure = { error -> error.message ?: "获取模型失败" },
-                                        )
+                                    val fetchStatus = onFetchModels(baseUrl, apiKey)
+                                    status = fetchStatus.openModelPicker(
+                                        target = ModelPickerTarget.Chat,
+                                        setOptions = { modelOptions = it },
+                                        openPicker = { isModelPickerOpen = true },
+                                        resetQuery = { modelQuery = "" },
+                                    )
                                     isLoadingModels = false
                                 }
                             },
-                            enabled = !isLoadingModels,
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-                                contentColor = MaterialTheme.colorScheme.onSurface,
-                            ),
-                        ) {
-                            if (isLoadingModels) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                Text("选择")
-                            }
-                        }
+                        )
                     }
+                    ModelSelectorRow(
+                        value = embeddingModel,
+                        onValueChange = { embeddingModel = it },
+                        label = "Embedding 模型",
+                        isLoading = isLoadingModels && modelPickerTarget == ModelPickerTarget.Embedding,
+                        onPick = {
+                            modelPickerTarget = ModelPickerTarget.Embedding
+                            isLoadingModels = true
+                            status = "正在获取模型..."
+                            scope.launch {
+                                status = onFetchModels(baseUrl, apiKey).openModelPicker(
+                                    target = ModelPickerTarget.Embedding,
+                                    setOptions = { modelOptions = it },
+                                    openPicker = { isModelPickerOpen = true },
+                                    resetQuery = { modelQuery = "" },
+                                )
+                                isLoadingModels = false
+                            }
+                        },
+                    )
+                    ModelSelectorRow(
+                        value = rerankModel,
+                        onValueChange = { rerankModel = it },
+                        label = "Rerank 模型",
+                        isLoading = isLoadingModels && modelPickerTarget == ModelPickerTarget.Rerank,
+                        onPick = {
+                            modelPickerTarget = ModelPickerTarget.Rerank
+                            isLoadingModels = true
+                            status = "正在获取模型..."
+                            scope.launch {
+                                status = onFetchModels(baseUrl, apiKey).openModelPicker(
+                                    target = ModelPickerTarget.Rerank,
+                                    setOptions = { modelOptions = it },
+                                    openPicker = { isModelPickerOpen = true },
+                                    resetQuery = { modelQuery = "" },
+                                )
+                                isLoadingModels = false
+                            }
+                        },
+                    )
+                    RetrievalModeSelector(
+                        selected = retrievalMode,
+                        onSelect = { retrievalMode = it },
+                    )
                 }
             }
 
@@ -222,7 +282,14 @@ fun SettingsRoute(
             ) {
                 Button(
                     onClick = {
-                        status = onSaveProvider(baseUrl, apiKey, model)
+                        status = onSaveProvider(
+                            baseUrl,
+                            apiKey,
+                            model,
+                            embeddingModel,
+                            rerankModel,
+                            retrievalMode,
+                        )
                             .fold(
                                 onSuccess = {
                                     apiKey = ""
@@ -265,8 +332,117 @@ fun SettingsRoute(
 }
 
 @Composable
+private fun ModelTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        label = { Text(label) },
+        singleLine = true,
+        shape = RoundedCornerShape(8.dp),
+    )
+}
+
+@Composable
+private fun ModelSelectorRow(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    isLoading: Boolean,
+    onPick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ModelTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = label,
+            modifier = Modifier.weight(1f),
+        )
+        FetchModelsButton(
+            isLoading = isLoading,
+            onClick = onPick,
+        )
+    }
+}
+
+@Composable
+private fun FetchModelsButton(
+    isLoading: Boolean,
+    onClick: () -> Unit,
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = !isLoading,
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Text("选择")
+        }
+    }
+}
+
+@Composable
+private fun RetrievalModeSelector(
+    selected: RetrievalMode,
+    onSelect: (RetrievalMode) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "记忆检索模式",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RetrievalMode.values().forEach { mode ->
+                FilledTonalButton(
+                    onClick = { onSelect(mode) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = if (selected == mode) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+                        },
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
+                ) {
+                    Text(
+                        text = mode.displayName,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModelPickerDialog(
     models: List<String>,
+    target: ModelPickerTarget,
     selectedModel: String,
     query: String,
     onQueryChange: (String) -> Unit,
@@ -275,16 +451,18 @@ private fun ModelPickerDialog(
 ) {
     val filteredModels = remember(models, query) {
         val normalizedQuery = query.trim()
+        val targetModels = models.filter { it.matchesTarget(target) }
+            .ifEmpty { models }
         if (normalizedQuery.isBlank()) {
-            models
+            targetModels
         } else {
-            models.filter { it.contains(normalizedQuery, ignoreCase = true) }
+            targetModels.filter { it.contains(normalizedQuery, ignoreCase = true) }
         }
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择模型") },
+        title = { Text(target.dialogTitle) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -357,6 +535,58 @@ private fun ModelPickerDialog(
     )
 }
 
+private enum class ModelPickerTarget(val dialogTitle: String) {
+    Chat("选择聊天模型"),
+    Embedding("选择 Embedding 模型"),
+    Rerank("选择 Rerank 模型"),
+}
+
+private fun String.matchesTarget(target: ModelPickerTarget): Boolean {
+    val id = lowercase()
+    return when (target) {
+        ModelPickerTarget.Chat -> !id.looksLikeEmbeddingModel() && !id.looksLikeRerankModel()
+        ModelPickerTarget.Embedding -> id.looksLikeEmbeddingModel() && !id.looksLikeRerankModel()
+        ModelPickerTarget.Rerank -> id.looksLikeRerankModel()
+    }
+}
+
+private fun String.looksLikeEmbeddingModel(): Boolean {
+    return contains("embed") ||
+        contains("embedding") ||
+        contains("bge-m3") ||
+        contains("e5-") ||
+        contains("gte-")
+}
+
+private fun String.looksLikeRerankModel(): Boolean {
+    return contains("rerank") ||
+        contains("reranker") ||
+        contains("bge-reranker") ||
+        contains("jina-reranker")
+}
+
+private fun Result<List<String>>.openModelPicker(
+    target: ModelPickerTarget,
+    setOptions: (List<String>) -> Unit,
+    openPicker: () -> Unit,
+    resetQuery: () -> Unit,
+): String {
+    return fold(
+        onSuccess = { models ->
+            setOptions(models)
+            resetQuery()
+            openPicker()
+            val matchedCount = models.count { it.matchesTarget(target) }
+            if (matchedCount > 0) {
+                "已获取 ${models.size} 个模型，匹配 ${matchedCount} 个"
+            } else {
+                "已获取 ${models.size} 个模型"
+            }
+        },
+        onFailure = { error -> error.message ?: "获取模型失败" },
+    )
+}
+
 @Composable
 private fun ProviderStatusPanel(
     settings: ProviderSettings,
@@ -406,7 +636,19 @@ private fun ProviderStatusPanel(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = settings.model,
+                text = buildString {
+                    append(settings.model)
+                    if (settings.embeddingModel.isNotBlank()) {
+                        append(" · Embedding: ")
+                        append(settings.embeddingModel)
+                    }
+                    if (settings.rerankModel.isNotBlank()) {
+                        append(" · Rerank: ")
+                        append(settings.rerankModel)
+                    }
+                    append(" · ")
+                    append(settings.retrievalMode.displayName)
+                },
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

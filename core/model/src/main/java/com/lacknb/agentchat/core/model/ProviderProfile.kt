@@ -6,6 +6,9 @@ data class ProviderProfile(
     val baseUrl: String,
     val encryptedApiKeyRef: String?,
     val defaultModel: String,
+    val embeddingModel: String,
+    val rerankModel: String,
+    val retrievalMode: RetrievalMode,
     val apiStyle: ApiStyle,
     val timeoutSeconds: Int = 60,
     val enabled: Boolean = true,
@@ -15,9 +18,18 @@ enum class ApiStyle {
     ChatCompletions,
 }
 
+enum class RetrievalMode(val displayName: String) {
+    Keyword("关键字检索"),
+    Vector("向量检索"),
+    Hybrid("混合检索"),
+}
+
 data class ProviderSettings(
     val baseUrl: String = "https://newapi.lacknb.edu.kg/v1",
     val model: String = "gpt-5.4-mini",
+    val embeddingModel: String = "",
+    val rerankModel: String = "",
+    val retrievalMode: RetrievalMode = RetrievalMode.Keyword,
     val hasApiKey: Boolean = false,
     val maskedApiKey: String = "",
 )

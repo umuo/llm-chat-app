@@ -23,6 +23,8 @@ internal data class MemoryEntity(
     val source: String,
     val sensitivity: String,
     val confidence: Float,
+    @ColumnInfo(name = "embedding_json") val embeddingJson: String,
+    @ColumnInfo(name = "embedding_model") val embeddingModel: String?,
     @ColumnInfo(name = "created_at_millis") val createdAtMillis: Long,
     @ColumnInfo(name = "updated_at_millis") val updatedAtMillis: Long,
     @ColumnInfo(name = "last_accessed_at_millis") val lastAccessedAtMillis: Long?,
@@ -39,6 +41,8 @@ internal fun MemoryEntity.toMemoryItem(): MemoryItem {
         source = enumValueOrDefault(source, MemorySource.User),
         sensitivity = enumValueOrDefault(sensitivity, MemorySensitivity.Low),
         confidence = confidence,
+        embedding = parseEmbedding(embeddingJson),
+        embeddingModel = embeddingModel?.takeIf { it.isNotBlank() },
         createdAtMillis = createdAtMillis,
         updatedAtMillis = updatedAtMillis,
         lastAccessedAtMillis = lastAccessedAtMillis,
@@ -56,6 +60,8 @@ internal fun MemoryItem.toEntity(): MemoryEntity {
         source = source.name,
         sensitivity = sensitivity.name,
         confidence = confidence,
+        embeddingJson = embedding.toEmbeddingJson(),
+        embeddingModel = embeddingModel,
         createdAtMillis = createdAtMillis,
         updatedAtMillis = updatedAtMillis,
         lastAccessedAtMillis = lastAccessedAtMillis,
@@ -67,6 +73,23 @@ internal fun List<String>.toTagsJson(): String {
     return JSONArray().apply {
         distinctTags().forEach { put(it) }
     }.toString()
+}
+
+internal fun List<Float>.toEmbeddingJson(): String {
+    return JSONArray().apply {
+        forEach { put(it.toDouble()) }
+    }.toString()
+}
+
+internal fun parseEmbedding(json: String): List<Float> {
+    return runCatching {
+        val array = JSONArray(json)
+        buildList {
+            for (index in 0 until array.length()) {
+                add(array.optDouble(index).toFloat())
+            }
+        }
+    }.getOrDefault(emptyList())
 }
 
 internal fun parseTags(json: String): List<String> {

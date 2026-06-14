@@ -4,6 +4,7 @@ import android.content.Context
 import com.lacknb.agentchat.core.model.ApiStyle
 import com.lacknb.agentchat.core.model.ProviderProfile
 import com.lacknb.agentchat.core.model.ProviderSettings
+import com.lacknb.agentchat.core.model.RetrievalMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,9 +22,14 @@ class ProviderRepository(
         baseUrl: String,
         apiKey: String,
         model: String,
+        embeddingModel: String,
+        rerankModel: String,
+        retrievalMode: RetrievalMode,
     ): Result<Unit> = runCatching {
         val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
         val normalizedModel = model.trim()
+        val normalizedEmbeddingModel = embeddingModel.trim()
+        val normalizedRerankModel = rerankModel.trim()
         require(normalizedBaseUrl.startsWith("http://") || normalizedBaseUrl.startsWith("https://")) {
             "API Base URL must start with http:// or https://"
         }
@@ -39,6 +45,9 @@ class ProviderRepository(
         prefs.edit()
             .putString(KeyBaseUrl, normalizedBaseUrl)
             .putString(KeyModel, normalizedModel)
+            .putString(KeyEmbeddingModel, normalizedEmbeddingModel)
+            .putString(KeyRerankModel, normalizedRerankModel)
+            .putString(KeyRetrievalMode, retrievalMode.name)
             .putBoolean(KeyHasApiKey, trimmedApiKey.isNotEmpty() || prefs.getBoolean(KeyHasApiKey, false))
             .apply()
 
@@ -53,6 +62,9 @@ class ProviderRepository(
             baseUrl = current.baseUrl,
             encryptedApiKeyRef = if (current.hasApiKey) DefaultApiKeyRef else null,
             defaultModel = current.model,
+            embeddingModel = current.embeddingModel,
+            rerankModel = current.rerankModel,
+            retrievalMode = current.retrievalMode,
             apiStyle = ApiStyle.ChatCompletions,
         )
     }
@@ -66,6 +78,11 @@ class ProviderRepository(
         return ProviderSettings(
             baseUrl = prefs.getString(KeyBaseUrl, DefaultBaseUrl) ?: DefaultBaseUrl,
             model = prefs.getString(KeyModel, DefaultModel) ?: DefaultModel,
+            embeddingModel = prefs.getString(KeyEmbeddingModel, DefaultEmbeddingModel) ?: DefaultEmbeddingModel,
+            rerankModel = prefs.getString(KeyRerankModel, DefaultRerankModel) ?: DefaultRerankModel,
+            retrievalMode = prefs.getString(KeyRetrievalMode, RetrievalMode.Keyword.name)
+                ?.let { value -> RetrievalMode.entries.firstOrNull { it.name == value } }
+                ?: RetrievalMode.Keyword,
             hasApiKey = hasApiKey,
             maskedApiKey = if (hasApiKey) "••••" else "",
         )
@@ -75,10 +92,15 @@ class ProviderRepository(
         const val PrefsName = "agentchat_provider"
         const val KeyBaseUrl = "base_url"
         const val KeyModel = "model"
+        const val KeyEmbeddingModel = "embedding_model"
+        const val KeyRerankModel = "rerank_model"
+        const val KeyRetrievalMode = "retrieval_mode"
         const val KeyHasApiKey = "has_api_key"
         const val DefaultProviderId = "default"
         const val DefaultApiKeyRef = "default_api_key"
         const val DefaultBaseUrl = "https://newapi.lacknb.edu.kg/v1"
         const val DefaultModel = "gpt-5.4-mini"
+        const val DefaultEmbeddingModel = ""
+        const val DefaultRerankModel = ""
     }
 }

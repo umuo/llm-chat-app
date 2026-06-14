@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [MemoryEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 internal abstract class MemoryDatabase : RoomDatabase() {
@@ -26,7 +26,7 @@ internal abstract class MemoryDatabase : RoomDatabase() {
                     MemoryDatabase::class.java,
                     "agentchat-memory.db",
                 )
-                    .addMigrations(Migration1To2)
+                    .addMigrations(Migration1To2, Migration2To3)
                     .build()
                     .also { instance = it }
             }
@@ -93,6 +93,13 @@ internal abstract class MemoryDatabase : RoomDatabase() {
                 database.execSQL("CREATE INDEX index_memory_items_type ON memory_items(type)")
                 database.execSQL("CREATE INDEX index_memory_items_archived ON memory_items(archived)")
                 database.execSQL("CREATE INDEX index_memory_items_updated_at_millis ON memory_items(updated_at_millis)")
+            }
+        }
+
+        private val Migration2To3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE memory_items ADD COLUMN embedding_json TEXT NOT NULL DEFAULT '[]'")
+                database.execSQL("ALTER TABLE memory_items ADD COLUMN embedding_model TEXT")
             }
         }
     }
