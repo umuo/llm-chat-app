@@ -39,6 +39,25 @@ class McpClient {
         val inputSchema: JSONObject
     )
 
+    data class McpResource(
+        val uri: String,
+        val name: String,
+        val description: String,
+        val mimeType: String
+    )
+
+    data class McpPrompt(
+        val name: String,
+        val description: String,
+        val arguments: List<McpPromptArgument>
+    )
+
+    data class McpPromptArgument(
+        val name: String,
+        val description: String,
+        val required: Boolean
+    )
+
     suspend fun connect(mcpUrl: String) {
         postEndpoint = mcpUrl // Under streamable-http, the endpoint is the same URL
         
@@ -146,6 +165,67 @@ class McpClient {
             )
         }
         return toolsList
+    }
+
+    suspend fun getResources(): List<McpResource> {
+        val response = sendRpcRequest("resources/list")
+        if (response.has("error")) {
+            throw IOException(response.getJSONObject("error").optString("message", "Unknown RPC error"))
+        }
+        val result = response.optJSONObject("result") ?: return emptyList()
+        val resourcesArray = result.optJSONArray("resources") ?: return emptyList()
+        
+        val resourcesList = mutableListOf<McpResource>()
+        for (i in 0 until resourcesArray.length()) {
+            val resJson = resourcesArray.getJSONObject(i)
+            resourcesList.add(
+                McpResource(
+                    uri = resJson.getString("uri"),
+                    name = resJson.getString("name"),
+                    description = resJson.optString("description", ""),
+                    mimeType = resJson.optString("mimeType", "")
+                )
+            )
+        }
+        return resourcesList
+    }
+
+    suspend fun getPrompts(): List<McpPrompt> {
+        val response = sendRpcRequest("prompts/list")
+        if (response.has("error")) {
+            throw IOException(response.getJSONObject("error").optString("message", "Unknown RPC error"))
+        }
+        val result = response.optJSONObject("result") ?: return emptyList()
+        val promptsArray = result.optJSONArray("prompts") ?: return emptyList()
+        
+        val promptsList = mutableListOf<McpPrompt>()
+        for (i in 0 until promptsArray.length()) {
+            val promptJson = promptsArray.getJSONObject(i)
+            val argsArray = promptJson.optJSONArray("arguments")
+            val argsList = mutableListOf<McpPromptArgument>()
+            
+            if (argsArray != null) {
+                for (j in 0 until argsArray.length()) {
+                    val argJson = argsArray.getJSONObject(j)
+                    argsList.add(
+                        McpPromptArgument(
+                            name = argJson.getString("name"),
+                            description = argJson.optString("description", ""),
+                            required = argJson.optBoolean("required", false)
+                        )
+                    )
+                }
+            }
+            
+            promptsList.add(
+                McpPrompt(
+                    name = promptJson.getString("name"),
+                    description = promptJson.optString("description", ""),
+                    arguments = argsList
+                )
+            )
+        }
+        return promptsList
     }
 
     suspend fun callTool(name: String, arguments: JSONObject): JSONObject {

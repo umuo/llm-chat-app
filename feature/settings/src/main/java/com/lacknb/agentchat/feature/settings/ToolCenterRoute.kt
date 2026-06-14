@@ -51,6 +51,7 @@ fun ToolCenterRoute(
 ) {
     var mcpServerUrl by rememberSaveable(settings.mcpServerUrl) { mutableStateOf(settings.mcpServerUrl) }
     var saveStatus by remember { mutableStateOf("") }
+    var showPreviewDialog by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -126,19 +127,39 @@ fun ToolCenterRoute(
                         Text(
                             text = saveStatus,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
                         )
-                        Button(
-                            onClick = {
-                                onSaveMcpUrl(mcpServerUrl)
-                                saveStatus = "已保存，后台将自动重连"
-                            },
-                            shape = RoundedCornerShape(8.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("保存配置")
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = { showPreviewDialog = true },
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = mcpServerUrl.isNotBlank()
+                            ) {
+                                Text("测试与预览")
+                            }
+                            Button(
+                                onClick = {
+                                    onSaveMcpUrl(mcpServerUrl)
+                                    saveStatus = "已保存，后台将自动重连"
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("保存配置")
+                            }
                         }
                     }
                 }
+            }
+
+            if (showPreviewDialog && mcpServerUrl.isNotBlank()) {
+                McpPreviewDialog(
+                    mcpUrl = mcpServerUrl,
+                    onDismiss = { showPreviewDialog = false }
+                )
             }
 
             // Skills Section
