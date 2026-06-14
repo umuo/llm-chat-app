@@ -9,6 +9,12 @@ interface ChatCompletionsClient {
         apiKey: String,
         request: ChatCompletionRequest,
     ): Flow<ChatCompletionStreamEvent>
+
+    suspend fun listModels(
+        baseUrl: String,
+        apiKey: String,
+        timeoutSeconds: Int = 30,
+    ): Result<List<String>>
 }
 
 sealed interface ChatCompletionStreamEvent {

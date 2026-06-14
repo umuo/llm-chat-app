@@ -2,18 +2,26 @@ package com.lacknb.agentchat.feature.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +34,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -45,12 +54,17 @@ fun SettingsRoute(
     onBackToChat: () -> Unit,
     onSaveProvider: (baseUrl: String, apiKey: String, model: String) -> Result<Unit>,
     onTestConnection: suspend () -> Result<Unit>,
+    onFetchModels: suspend (baseUrl: String, apiKey: String) -> Result<List<String>>,
 ) {
     val scope = rememberCoroutineScope()
     var baseUrl by rememberSaveable(settings.baseUrl) { androidx.compose.runtime.mutableStateOf(settings.baseUrl) }
     var apiKey by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var model by rememberSaveable(settings.model) { androidx.compose.runtime.mutableStateOf(settings.model) }
     var isTesting by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var isLoadingModels by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var isModelPickerOpen by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var modelQuery by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var modelOptions by remember { androidx.compose.runtime.mutableStateOf<List<String>>(emptyList()) }
     var status by rememberSaveable(settings.hasApiKey, settings.baseUrl, settings.model) {
         androidx.compose.runtime.mutableStateOf(
             if (settings.hasApiKey) {
@@ -58,6 +72,21 @@ fun SettingsRoute(
             } else {
                 "缺少 API 密钥"
             },
+        )
+    }
+
+    if (isModelPickerOpen) {
+        ModelPickerDialog(
+            models = modelOptions,
+            selectedModel = model,
+            query = modelQuery,
+            onQueryChange = { modelQuery = it },
+            onSelect = { selectedModel ->
+                model = selectedModel
+                isModelPickerOpen = false
+                status = "已选择模型 · $selectedModel"
+            },
+            onDismiss = { isModelPickerOpen = false },
         )
     }
 
@@ -136,14 +165,54 @@ fun SettingsRoute(
                         singleLine = true,
                         shape = RoundedCornerShape(8.dp),
                     )
-                    OutlinedTextField(
-                        value = model,
-                        onValueChange = { model = it },
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("模型") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp),
-                    )
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = model,
+                            onValueChange = { model = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("模型") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                isLoadingModels = true
+                                status = "正在获取模型..."
+                                scope.launch {
+                                    status = onFetchModels(baseUrl, apiKey)
+                                        .fold(
+                                            onSuccess = { models ->
+                                                modelOptions = models
+                                                modelQuery = ""
+                                                isModelPickerOpen = true
+                                                "已获取 ${models.size} 个模型"
+                                            },
+                                            onFailure = { error -> error.message ?: "获取模型失败" },
+                                        )
+                                    isLoadingModels = false
+                                }
+                            },
+                            enabled = !isLoadingModels,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                            ),
+                        ) {
+                            if (isLoadingModels) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Text("选择")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -193,6 +262,99 @@ fun SettingsRoute(
             }
         }
     }
+}
+
+@Composable
+private fun ModelPickerDialog(
+    models: List<String>,
+    selectedModel: String,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val filteredModels = remember(models, query) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isBlank()) {
+            models
+        } else {
+            models.filter { it.contains(normalizedQuery, ignoreCase = true) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择模型") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("搜索模型") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                )
+                Text(
+                    text = "共 ${models.size} 个，匹配 ${filteredModels.size} 个",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            shape = RoundedCornerShape(8.dp),
+                        ),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    LazyColumn {
+                        items(filteredModels, key = { it }) { option ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelect(option) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = option,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (option == selectedModel) {
+                                        FontWeight.SemiBold
+                                    } else {
+                                        FontWeight.Normal
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (option == selectedModel) {
+                                    Text(
+                                        text = "当前模型",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.64f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+    )
 }
 
 @Composable

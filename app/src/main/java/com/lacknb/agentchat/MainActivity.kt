@@ -182,6 +182,14 @@ private fun AgentChatApp(
                         chatClient = chatClient,
                     )
                 },
+                onFetchModels = { baseUrl, apiKey ->
+                    fetchProviderModels(
+                        providerRepository = providerRepository,
+                        chatClient = chatClient,
+                        baseUrl = baseUrl,
+                        apiKey = apiKey,
+                    )
+                },
             )
         }
         composable(TopLevelDestination.Prompts.route) {
@@ -398,6 +406,32 @@ private suspend fun testChatCompletionConnection(
             }
         }
     }
+}
+
+private suspend fun fetchProviderModels(
+    providerRepository: ProviderRepository,
+    chatClient: ChatCompletionsClient,
+    baseUrl: String,
+    apiKey: String,
+): Result<List<String>> {
+    val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
+    val resolvedApiKey = apiKey.trim().ifEmpty {
+        providerRepository.currentApiKey().orEmpty()
+    }
+    if (normalizedBaseUrl.isBlank()) {
+        return Result.failure(IllegalArgumentException("API Base URL is required"))
+    }
+    if (!normalizedBaseUrl.startsWith("http://") && !normalizedBaseUrl.startsWith("https://")) {
+        return Result.failure(IllegalArgumentException("API Base URL must start with http:// or https://"))
+    }
+    if (resolvedApiKey.isBlank()) {
+        return Result.failure(IllegalStateException("API 密钥未配置"))
+    }
+
+    return chatClient.listModels(
+        baseUrl = normalizedBaseUrl,
+        apiKey = resolvedApiKey,
+    )
 }
 
 private const val MaxAgentToolTurns = 5

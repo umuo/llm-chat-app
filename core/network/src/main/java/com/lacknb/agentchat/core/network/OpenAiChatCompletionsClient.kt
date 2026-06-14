@@ -3,6 +3,7 @@ package com.lacknb.agentchat.core.network
 import android.util.Log
 import com.lacknb.agentchat.core.model.ProviderProfile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -16,6 +17,48 @@ import java.net.URL
 private const val NetworkLogTag = "AgentChatNetwork"
 
 class OpenAiChatCompletionsClient : ChatCompletionsClient {
+
+    override suspend fun listModels(
+        baseUrl: String,
+        apiKey: String,
+        timeoutSeconds: Int,
+    ): Result<List<String>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val endpoint = baseUrl.trim().trimEnd('/') + "/models"
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = timeoutSeconds * 1000
+                readTimeout = timeoutSeconds * 1000
+                setRequestProperty("Authorization", "Bearer $apiKey")
+                setRequestProperty("Accept", "application/json")
+            }
+
+            try {
+                if (connection.responseCode !in 200..299) {
+                    val message = buildHttpErrorMessage(connection)
+                    Log.w(NetworkLogTag, message)
+                    throw ModelListException(message)
+                }
+
+                val responseBody = connection.inputStream
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { it.readText() }
+                val models = JSONObject(responseBody).toModelIds()
+                require(models.isNotEmpty()) {
+                    "模型列表为空"
+                }
+                models
+            } catch (error: ModelListException) {
+                throw error
+            } catch (error: Throwable) {
+                val message = buildRequestFailureMessage("Models request failed", error)
+                Log.e(NetworkLogTag, message, error)
+                throw IllegalStateException(message, error)
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
 
     override fun streamChatCompletion(
         profile: ProviderProfile,
@@ -73,7 +116,7 @@ class OpenAiChatCompletionsClient : ChatCompletionsClient {
                 }
             }
         } catch (error: Throwable) {
-            val message = buildRequestFailureMessage(error)
+            val message = buildRequestFailureMessage("Chat Completions request failed", error)
             Log.e(NetworkLogTag, message, error)
             emit(ChatCompletionStreamEvent.Failed(message, error))
         } finally {
@@ -81,6 +124,8 @@ class OpenAiChatCompletionsClient : ChatCompletionsClient {
         }
     }.flowOn(Dispatchers.IO)
 }
+
+private class ModelListException(message: String) : RuntimeException(message)
 
 private fun buildHttpErrorMessage(connection: HttpURLConnection): String {
     val statusLine = "HTTP ${connection.responseCode}: ${connection.responseMessage}"
@@ -99,14 +144,25 @@ private fun buildHttpErrorMessage(connection: HttpURLConnection): String {
     }
 }
 
-private fun buildRequestFailureMessage(error: Throwable): String {
+private fun buildRequestFailureMessage(prefix: String, error: Throwable): String {
     val type = error::class.java.simpleName.ifBlank { "Throwable" }
     val detail = error.message?.takeIf { it.isNotBlank() }
     return if (detail == null) {
-        "Chat Completions request failed: $type"
+        "$prefix: $type"
     } else {
-        "Chat Completions request failed: $type: $detail"
+        "$prefix: $type: $detail"
     }
+}
+
+private fun JSONObject.toModelIds(): List<String> {
+    val data = optJSONArray("data") ?: JSONArray()
+    return buildList {
+        for (index in 0 until data.length()) {
+            val model = data.optJSONObject(index) ?: continue
+            val id = model.optString("id").trim()
+            if (id.isNotEmpty()) add(id)
+        }
+    }.distinct().sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
 }
 
 private fun ChatCompletionRequest.toJson(): JSONObject {
