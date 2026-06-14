@@ -60,7 +60,7 @@ class WriteFileTool(private val agentWorkspace: File) : AgentTool {
     override val declaration: ChatCompletionTool = ChatCompletionTool(
         function = ChatCompletionFunction(
             name = name,
-            description = "在应用私有的智能体工作空间内写入一个 UTF-8 文本文件，必要时创建父目录。",
+            description = "在应用私有的智能体工作空间内写入一个 UTF-8 文本文件。注意：仅限以下场景使用：1.需要持久化长篇思维链或复杂中间结果（作为临时草稿本）；2.生成特定结构化文件（如 .json/.csv）以供系统原生UI读取；3.生成用户明确要求导出/分享的完整报告或文档。不要将此工具用于简单的临时变量或常规回答。",
             parametersJson = """
                 {
                   "type": "object",
@@ -94,7 +94,7 @@ class EditFileTool(private val agentWorkspace: File) : AgentTool {
     override val declaration: ChatCompletionTool = ChatCompletionTool(
         function = ChatCompletionFunction(
             name = name,
-            description = "替换应用私有智能体工作空间内 UTF-8 文件中的文本。",
+            description = "替换应用私有智能体工作空间内 UTF-8 文件中的文本。注意：仅在维护草稿本、更新原生渲染用的结构化配置或修改待导出的完整文档时使用。不要滥用此工具。",
             parametersJson = """
                 {
                   "type": "object",
