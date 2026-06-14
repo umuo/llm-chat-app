@@ -348,8 +348,13 @@ fun ChatRoute(
                         )
                     },
                     onFailure = { error ->
+                        val errorMessage = error.message ?: "请求失败"
                         message.copy(
-                            content = message.content.ifBlank { error.message ?: "请求失败" },
+                            content = if (message.content.isBlank()) {
+                                errorMessage
+                            } else {
+                                message.content + "\n\n**请求失败:** $errorMessage"
+                            },
                             status = MessageStatus.Failed,
                         )
                     },
@@ -441,8 +446,13 @@ fun ChatRoute(
                         )
                     },
                     onFailure = { error ->
+                        val errorMessage = error.message ?: "请求失败"
                         message.copy(
-                            content = message.content.ifBlank { error.message ?: "请求失败" },
+                            content = if (message.content.isBlank()) {
+                                errorMessage
+                            } else {
+                                message.content + "\n\n**请求失败:** $errorMessage"
+                            },
                             status = MessageStatus.Failed,
                         )
                     }
