@@ -32,8 +32,6 @@ class McpClient {
     private var eventSource: EventSource? = null
     private var postEndpoint: String? = null
 
-    private val pendingRequests = ConcurrentHashMap<String, CancellableContinuation<JSONObject>>()
-
     // Define data classes for tools
     data class McpTool(
         val name: String,
@@ -41,68 +39,42 @@ class McpClient {
         val inputSchema: JSONObject
     )
 
-    suspend fun connect(sseUrl: String) {
-        return suspendCancellableCoroutine { continuation ->
-            val request = Request.Builder()
-                .url(sseUrl)
-                .header("Accept", "text/event-stream")
-                .build()
+    suspend fun connect(mcpUrl: String) {
+        postEndpoint = mcpUrl // Under streamable-http, the endpoint is the same URL
+        
+        // Optionally establish SSE for server-to-client notifications
+        val request = Request.Builder()
+            .url(mcpUrl)
+            .header("Accept", "text/event-stream")
+            .build()
 
-            eventSource = eventSourceFactory.newEventSource(request, object : EventSourceListener() {
-                override fun onOpen(eventSource: EventSource, response: Response) {
-                    // Connection opened, but we wait for the 'endpoint' event
-                }
-
-                override fun onEvent(
-                    eventSource: EventSource,
-                    id: String?,
-                    type: String?,
-                    data: String
-                ) {
-                    if (type == "endpoint") {
-                        val baseUri = Uri.parse(sseUrl)
-                        // data usually contains a relative or absolute path
-                        val endpointUri = if (data.startsWith("http")) {
-                            data
-                        } else {
-                            Uri.withAppendedPath(baseUri, data).toString()
-                        }
-                        postEndpoint = endpointUri
-                        if (continuation.isActive) {
-                            continuation.resume(Unit)
-                        }
-                    } else if (type == "message") {
-                        handleMessage(data)
+        eventSource = eventSourceFactory.newEventSource(request, object : EventSourceListener() {
+            override fun onEvent(
+                eventSource: EventSource,
+                id: String?,
+                type: String?,
+                data: String
+            ) {
+                // If the server sends a legacy 'endpoint' event, we can update it just in case
+                if (type == "endpoint") {
+                    val baseUri = Uri.parse(mcpUrl)
+                    postEndpoint = if (data.startsWith("http")) {
+                        data
+                    } else {
+                        Uri.withAppendedPath(baseUri, data).toString()
                     }
+                } else if (type == "message") {
+                    handleMessage(data)
                 }
-
-                override fun onClosed(eventSource: EventSource) {
-                    if (continuation.isActive) {
-                        continuation.resumeWithException(IOException("SSE closed unexpectedly"))
-                    }
-                }
-
-                override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                    if (continuation.isActive) {
-                        val ex = t ?: IOException("SSE connection failed with code ${response?.code}")
-                        continuation.resumeWithException(ex)
-                    }
-                }
-            })
-
-            continuation.invokeOnCancellation {
-                eventSource?.cancel()
             }
-        }
+        })
     }
 
     private fun handleMessage(data: String) {
+        // Handle server-to-client notifications here if needed in the future
         try {
             val json = JSONObject(data)
-            val id = json.optString("id", "")
-            if (id.isNotEmpty() && pendingRequests.containsKey(id)) {
-                pendingRequests.remove(id)?.resume(json)
-            }
+            // Notifications don't have an ID.
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -125,27 +97,33 @@ class McpClient {
             .build()
 
         return@withContext suspendCancellableCoroutine { continuation ->
-            pendingRequests[id] = continuation
-
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    pendingRequests.remove(id)
                     if (continuation.isActive) continuation.resumeWithException(e)
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    if (!response.isSuccessful) {
-                        pendingRequests.remove(id)
-                        if (continuation.isActive) continuation.resumeWithException(IOException("HTTP error ${response.code}"))
+                    try {
+                        if (!response.isSuccessful) {
+                            if (continuation.isActive) continuation.resumeWithException(IOException("HTTP error ${response.code}"))
+                            return
+                        }
+                        
+                        val responseBody = response.body?.string()
+                        if (responseBody.isNullOrEmpty()) {
+                            if (continuation.isActive) continuation.resumeWithException(IOException("Empty response body"))
+                            return
+                        }
+                        
+                        val jsonResponse = JSONObject(responseBody)
+                        if (continuation.isActive) continuation.resume(jsonResponse)
+                    } catch (e: Exception) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    } finally {
+                        response.close()
                     }
-                    // Actual response comes via SSE message
-                    response.close()
                 }
             })
-
-            continuation.invokeOnCancellation {
-                pendingRequests.remove(id)
-            }
         }
     }
 
@@ -186,7 +164,5 @@ class McpClient {
         eventSource?.cancel()
         eventSource = null
         postEndpoint = null
-        pendingRequests.forEach { (_, cont) -> cont.cancel() }
-        pendingRequests.clear()
     }
 }
