@@ -112,6 +112,7 @@ class McpClient {
         val requestBody = rpcRequest.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url(endpoint)
+            .header("Accept", "application/json, text/event-stream")
             .post(requestBody)
             .build()
 
