@@ -373,6 +373,7 @@ private fun ChatCompletionRequest.toJson(): JSONObject {
         .apply {
             temperature?.let { put("temperature", it) }
             topP?.let { put("top_p", it) }
+            topK?.let { put("top_k", it) }
             maxTokens?.let { put("max_tokens", it) }
             if (tools.isNotEmpty()) {
                 put(

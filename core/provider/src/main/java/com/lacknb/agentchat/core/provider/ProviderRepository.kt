@@ -61,6 +61,16 @@ class ProviderRepository(
         _settings.value = loadSettings()
     }
 
+    fun saveLlmParameters(temperature: Float, topP: Float, topK: Int, maxTokens: Int) {
+        prefs.edit()
+            .putFloat(KeyTemperature, temperature)
+            .putFloat(KeyTopP, topP)
+            .putInt(KeyTopK, topK)
+            .putInt(KeyMaxTokens, maxTokens)
+            .apply()
+        _settings.value = loadSettings()
+    }
+
     fun currentProfile(): ProviderProfile {
         val current = settings.value
         return ProviderProfile(
@@ -74,6 +84,10 @@ class ProviderRepository(
             retrievalMode = current.retrievalMode,
             apiStyle = ApiStyle.ChatCompletions,
             mcpServerUrl = current.mcpServerUrl,
+            temperature = current.temperature,
+            topP = current.topP,
+            topK = current.topK,
+            maxTokens = current.maxTokens,
         )
     }
 
@@ -94,6 +108,10 @@ class ProviderRepository(
             hasApiKey = hasApiKey,
             maskedApiKey = if (hasApiKey) "••••" else "",
             mcpServerUrl = prefs.getString(KeyMcpServerUrl, "") ?: "",
+            temperature = prefs.getFloat(KeyTemperature, 0.7f),
+            topP = prefs.getFloat(KeyTopP, 0.95f),
+            topK = prefs.getInt(KeyTopK, 40),
+            maxTokens = prefs.getInt(KeyMaxTokens, 8192),
         )
     }
 
@@ -106,6 +124,10 @@ class ProviderRepository(
         const val KeyRetrievalMode = "retrieval_mode"
         const val KeyHasApiKey = "has_api_key"
         const val KeyMcpServerUrl = "mcp_server_url"
+        const val KeyTemperature = "llm_temperature"
+        const val KeyTopP = "llm_top_p"
+        const val KeyTopK = "llm_top_k"
+        const val KeyMaxTokens = "llm_max_tokens"
         const val DefaultProviderId = "default"
         const val DefaultApiKeyRef = "default_api_key"
         const val DefaultBaseUrl = "https://newapi.lacknb.edu.kg/v1"

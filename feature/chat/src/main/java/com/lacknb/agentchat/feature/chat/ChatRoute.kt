@@ -130,11 +130,13 @@ fun ChatRoute(
         onDelta: (String) -> Unit,
         onToolCallDelta: (ChatToolCall) -> Unit,
     ) -> Result<Unit>,
+    onSaveLlmParameters: (temperature: Float, topP: Float, topK: Int, maxTokens: Int) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val historyManager = remember { ConversationHistoryManager(context) }
     var currentConversationId by rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var showHistoryDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showParamsSheet by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var historySummaries by remember { androidx.compose.runtime.mutableStateOf(historyManager.getSummaries()) }
 
     val scope = rememberCoroutineScope()
@@ -532,6 +534,7 @@ fun ChatRoute(
                     selectedAttachments = selectedAttachments,
                     onAttachFileClick = { filePickerLauncher.launch("*/*") },
                     onRemoveAttachment = { selectedAttachments.remove(it) },
+                    onOpenParams = { showParamsSheet = true },
                     modifier = Modifier
                         .navigationBarsPadding()
                         .imePadding(),
@@ -618,6 +621,14 @@ fun ChatRoute(
                     currentConversationId = null
                 }
             }
+        )
+    }
+
+    if (showParamsSheet) {
+        LlmParametersSheet(
+            settings = providerSettings,
+            onDismiss = { showParamsSheet = false },
+            onSave = onSaveLlmParameters
         )
     }
 }
@@ -777,6 +788,7 @@ private fun ComposerBar(
     selectedAttachments: List<ChatAttachment>,
     onAttachFileClick: () -> Unit,
     onRemoveAttachment: (ChatAttachment) -> Unit,
+    onOpenParams: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -788,10 +800,23 @@ private fun ComposerBar(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ModeSelector(
-                selectedMode = selectedMode,
-                onModeSelected = onModeSelected,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ModeSelector(
+                    selectedMode = selectedMode,
+                    onModeSelected = onModeSelected,
+                )
+                IconButton(onClick = onOpenParams) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "模型参数设置",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
             if (selectedAttachments.isNotEmpty()) {
                 LazyRow(
@@ -1733,6 +1758,122 @@ private fun getFileName(context: Context, uri: Uri): String {
         }
     }
     return result ?: "unknown"
+}
+
+@androidx.compose.material3.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun LlmParametersSheet(
+    settings: ProviderSettings,
+    onDismiss: () -> Unit,
+    onSave: (Float, Float, Int, Int) -> Unit,
+) {
+    var temperature by remember { androidx.compose.runtime.mutableFloatStateOf(settings.temperature) }
+    var topP by remember { androidx.compose.runtime.mutableFloatStateOf(settings.topP) }
+    var topK by remember { androidx.compose.runtime.mutableIntStateOf(settings.topK) }
+    var maxTokens by remember { androidx.compose.runtime.mutableIntStateOf(settings.maxTokens) }
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            Text(
+                text = "模型参数设置",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+
+            // Temperature
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Temperature", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(String.format("%.2f", temperature), style = MaterialTheme.typography.bodyMedium)
+                }
+                Text("控制输出随机性。0.0 最确定，2.0 最随机。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.material3.Slider(
+                    value = temperature,
+                    onValueChange = { temperature = it },
+                    valueRange = 0f..2f
+                )
+            }
+
+            // Top P
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Top P", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(String.format("%.2f", topP), style = MaterialTheme.typography.bodyMedium)
+                }
+                Text("核采样方法。0.1 表示只考虑前 10% 概率的词。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.material3.Slider(
+                    value = topP,
+                    onValueChange = { topP = it },
+                    valueRange = 0f..1f
+                )
+            }
+
+            // Top K
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Top K (设为 0 表示不限制)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(topK.toString(), style = MaterialTheme.typography.bodyMedium)
+                }
+                androidx.compose.material3.Slider(
+                    value = topK.toFloat(),
+                    onValueChange = { topK = it.toInt() },
+                    valueRange = 0f..100f,
+                    steps = 99
+                )
+            }
+
+            // Max Tokens
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Max Tokens (设为 0 表示自动)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(maxTokens.toString(), style = MaterialTheme.typography.bodyMedium)
+                }
+                androidx.compose.material3.Slider(
+                    value = maxTokens.toFloat(),
+                    onValueChange = { maxTokens = it.toInt() },
+                    valueRange = 0f..8192f,
+                    steps = 63 // Roughly every 128 tokens
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                androidx.compose.material3.TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                androidx.compose.material3.Button(onClick = {
+                    onSave(temperature, topP, topK, maxTokens)
+                    onDismiss()
+                }) {
+                    Text("保存")
+                }
+            }
+        }
+    }
 }
 
 private fun readUriAsBase64(context: Context, uri: Uri): String? {

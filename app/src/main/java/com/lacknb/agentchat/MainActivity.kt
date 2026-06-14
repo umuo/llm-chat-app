@@ -190,6 +190,7 @@ private fun AgentChatApp(
                         onToolCallDelta = onToolCallDelta,
                     )
                 },
+                onSaveLlmParameters = providerRepository::saveLlmParameters,
             )
         }
         composable(TopLevelDestination.Memory.route) {
@@ -303,6 +304,10 @@ private suspend fun runAgentChatCompletion(
             model = profile.defaultModel,
             messages = conversation,
             stream = true,
+            temperature = profile.temperature.toDouble(),
+            topP = profile.topP.toDouble(),
+            topK = if (profile.topK > 0) profile.topK else null,
+            maxTokens = if (profile.maxTokens > 0) profile.maxTokens else null,
             tools = toolRegistry.getAllDeclarations(),
             toolChoice = "auto",
         )
@@ -515,6 +520,10 @@ private suspend fun streamChatCompletion(
                 )
             },
         stream = true,
+        temperature = profile.temperature.toDouble(),
+        topP = profile.topP.toDouble(),
+        topK = if (profile.topK > 0) profile.topK else null,
+        maxTokens = if (profile.maxTokens > 0) profile.maxTokens else null,
     )
 
     chatClient.streamChatCompletion(

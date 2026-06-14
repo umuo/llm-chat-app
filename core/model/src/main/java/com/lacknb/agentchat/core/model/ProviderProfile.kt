@@ -13,6 +13,10 @@ data class ProviderProfile(
     val timeoutSeconds: Int = 60,
     val mcpServerUrl: String = "",
     val enabled: Boolean = true,
+    val temperature: Float = 0.7f,
+    val topP: Float = 0.95f,
+    val topK: Int = 40,
+    val maxTokens: Int = 8192,
 )
 
 enum class ApiStyle {
@@ -34,4 +38,8 @@ data class ProviderSettings(
     val hasApiKey: Boolean = false,
     val maskedApiKey: String = "",
     val mcpServerUrl: String = "",
+    val temperature: Float = 0.7f,
+    val topP: Float = 0.95f,
+    val topK: Int = 40,
+    val maxTokens: Int = 8192,
 )
