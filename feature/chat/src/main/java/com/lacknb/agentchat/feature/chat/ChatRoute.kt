@@ -111,6 +111,7 @@ import android.content.Context
 import com.lacknb.agentchat.core.model.ChatAttachment
 import kotlinx.coroutines.Dispatchers
 
+@kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatRoute(
     providerSettings: ProviderSettings,
@@ -1760,7 +1761,7 @@ private fun getFileName(context: Context, uri: Uri): String {
     return result ?: "unknown"
 }
 
-@androidx.compose.material3.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@androidx.compose.material3.ExperimentalMaterial3Api
 @Composable
 private fun LlmParametersSheet(
     settings: ProviderSettings,
