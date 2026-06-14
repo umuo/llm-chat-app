@@ -60,11 +60,13 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_AgentChat)
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         val providerRepository = ProviderRepository(applicationContext)
         val promptRepository = PromptRepository(applicationContext)
         val memoryRepository = MemoryRepository(applicationContext)
