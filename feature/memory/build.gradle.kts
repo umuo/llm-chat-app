@@ -1,18 +1,14 @@
 plugins {
-    id("com.android.application")
+    id("com.android.library")
     id("org.jetbrains.kotlin.android")
 }
 
 android {
-    namespace = "com.lacknb.agentchat"
+    namespace = "com.lacknb.agentchat.feature.memory"
     compileSdk = 33
 
     defaultConfig {
-        applicationId = "com.lacknb.agentchat"
         minSdk = 26
-        targetSdk = 33
-        versionCode = 1
-        versionName = "0.1.0"
     }
 
     buildFeatures {
@@ -34,27 +30,15 @@ android {
 }
 
 dependencies {
-    implementation(project(":core:designsystem"))
-    implementation(project(":core:harness"))
-    implementation(project(":core:model"))
-    implementation(project(":core:network"))
-    implementation(project(":core:provider"))
-    implementation(project(":core:prompts"))
     implementation(project(":core:memory"))
-    implementation(project(":feature:chat"))
-    implementation(project(":feature:memory"))
-    implementation(project(":feature:prompts"))
-    implementation(project(":feature:settings"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.runtime)
     implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.coroutines.android)
-
-    debugImplementation(libs.androidx.compose.ui.tooling)
 }

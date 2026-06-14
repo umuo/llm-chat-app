@@ -38,10 +38,12 @@ import com.lacknb.agentchat.core.network.ChatCompletionToolCall
 import com.lacknb.agentchat.core.network.ChatCompletionToolCallFunction
 import com.lacknb.agentchat.core.network.ChatCompletionsClient
 import com.lacknb.agentchat.core.network.OpenAiChatCompletionsClient
+import com.lacknb.agentchat.core.memory.MemoryRepository
 import com.lacknb.agentchat.core.prompts.ManagedPrompt
 import com.lacknb.agentchat.core.prompts.PromptRepository
 import com.lacknb.agentchat.core.provider.ProviderRepository
 import com.lacknb.agentchat.feature.chat.ChatRoute
+import com.lacknb.agentchat.feature.memory.MemoryManagementRoute
 import com.lacknb.agentchat.feature.prompts.PromptManagementRoute
 import com.lacknb.agentchat.feature.settings.SettingsRoute
 import com.lacknb.agentchat.tool.ToolRegistry
@@ -64,6 +66,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val providerRepository = ProviderRepository(applicationContext)
         val promptRepository = PromptRepository(applicationContext)
+        val memoryRepository = MemoryRepository(applicationContext)
         val chatClient = OpenAiChatCompletionsClient()
         val agentWorkspace = File(applicationContext.filesDir, "agent_workspace")
         val toolRegistry = ToolRegistry(
@@ -92,6 +95,7 @@ class MainActivity : ComponentActivity() {
                     AgentChatApp(
                         providerRepository = providerRepository,
                         promptRepository = promptRepository,
+                        memoryRepository = memoryRepository,
                         chatClient = chatClient,
                         toolRegistry = toolRegistry,
                     )
@@ -121,6 +125,7 @@ private fun StartupSplashImage() {
 private fun AgentChatApp(
     providerRepository: ProviderRepository,
     promptRepository: PromptRepository,
+    memoryRepository: MemoryRepository,
     chatClient: ChatCompletionsClient,
     toolRegistry: ToolRegistry,
 ) {
@@ -136,6 +141,7 @@ private fun AgentChatApp(
                 providerSettings = providerSettings,
                 onOpenSettings = { navController.navigate(TopLevelDestination.Settings.route) },
                 onOpenPrompts = { navController.navigate(TopLevelDestination.Prompts.route) },
+                onOpenMemory = { navController.navigate(TopLevelDestination.Memory.route) },
                 onSendMessage = { messages, onDelta, onToolCallDelta ->
                     streamChatCompletion(
                         providerRepository = providerRepository,
@@ -157,6 +163,12 @@ private fun AgentChatApp(
                         onToolCallDelta = onToolCallDelta,
                     )
                 },
+            )
+        }
+        composable(TopLevelDestination.Memory.route) {
+            MemoryManagementRoute(
+                repository = memoryRepository,
+                onBackToChat = { navController.popBackStack() },
             )
         }
         composable(TopLevelDestination.Settings.route) {
@@ -491,6 +503,7 @@ private fun MessageRole.toChatCompletionRole(): String {
 
 private enum class TopLevelDestination(val route: String) {
     Chat(route = "chat"),
+    Memory(route = "memory"),
     Prompts(route = "prompts"),
     Settings(route = "settings"),
 }
