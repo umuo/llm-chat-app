@@ -520,7 +520,12 @@ fun ChatRoute(
                     input = input,
                     onInputChange = { input = it },
                     selectedMode = selectedMode,
-                    onModeSelected = { selectedMode = it },
+                    onModeSelected = { 
+                        if (messages.isNotEmpty()) {
+                            resetConversation()
+                        }
+                        selectedMode = it 
+                    },
                     isSending = isSending,
                     onSend = ::sendMessage,
                     onStop = ::stopGeneration,
