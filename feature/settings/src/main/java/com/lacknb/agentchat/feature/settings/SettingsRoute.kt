@@ -60,6 +60,7 @@ fun SettingsRoute(
         embeddingModel: String,
         rerankModel: String,
         retrievalMode: RetrievalMode,
+        mcpServerUrl: String,
     ) -> Result<Unit>,
     onTestConnection: suspend () -> Result<Unit>,
     onFetchModels: suspend (baseUrl: String, apiKey: String) -> Result<List<String>>,
@@ -77,6 +78,7 @@ fun SettingsRoute(
     var retrievalMode by rememberSaveable(settings.retrievalMode) {
         androidx.compose.runtime.mutableStateOf(settings.retrievalMode)
     }
+    var mcpServerUrl by rememberSaveable(settings.mcpServerUrl) { androidx.compose.runtime.mutableStateOf(settings.mcpServerUrl) }
     var isTesting by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var isLoadingModels by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var isModelPickerOpen by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
@@ -276,6 +278,33 @@ fun SettingsRoute(
                 }
             }
 
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                tonalElevation = 0.dp,
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "MCP Server 设置",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OutlinedTextField(
+                        value = mcpServerUrl,
+                        onValueChange = { mcpServerUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("SSE URL (可选)") },
+                        placeholder = { Text("例如：http://192.168.1.100:3000/sse") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                    )
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -289,6 +318,7 @@ fun SettingsRoute(
                             embeddingModel,
                             rerankModel,
                             retrievalMode,
+                            mcpServerUrl,
                         )
                             .fold(
                                 onSuccess = {

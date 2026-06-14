@@ -61,6 +61,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import androidx.core.view.WindowCompat
+import com.lacknb.agentchat.core.network.mcp.McpClient
+import com.lacknb.agentchat.tool.McpAgentTool
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,6 +140,22 @@ private fun AgentChatApp(
 ) {
     val navController = rememberNavController()
     val providerSettings by providerRepository.settings.collectAsState()
+
+    LaunchedEffect(providerSettings.mcpServerUrl) {
+        if (providerSettings.mcpServerUrl.isNotBlank()) {
+            val mcpClient = McpClient()
+            try {
+                mcpClient.connect(providerSettings.mcpServerUrl)
+                val mcpTools = mcpClient.getTools().map { McpAgentTool(mcpClient, it) }
+                toolRegistry.addDynamicTools(mcpTools)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                toolRegistry.clearDynamicTools()
+            }
+        } else {
+            toolRegistry.clearDynamicTools()
+        }
+    }
 
     NavHost(
         navController = navController,

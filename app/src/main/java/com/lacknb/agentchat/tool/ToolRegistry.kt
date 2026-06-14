@@ -4,18 +4,30 @@ import com.lacknb.agentchat.core.harness.RiskLevel
 import com.lacknb.agentchat.core.network.ChatCompletionTool
 import org.json.JSONObject
 
-class ToolRegistry(private val tools: List<AgentTool>) {
+class ToolRegistry(baseTools: List<AgentTool>) {
+
+    private val _tools = mutableListOf<AgentTool>().apply { addAll(baseTools) }
 
     val size: Int
-        get() = tools.size
+        get() = _tools.size
 
-    fun getAllDeclarations(): List<ChatCompletionTool> = tools.map { it.declaration }
+    fun getAllDeclarations(): List<ChatCompletionTool> = _tools.map { it.declaration }
+
+    fun addDynamicTools(dynamicTools: List<AgentTool>) {
+        // Remove existing dynamic tools (assuming they are McpAgentTool for now, or just clearing them)
+        _tools.removeAll { it is McpAgentTool }
+        _tools.addAll(dynamicTools)
+    }
+
+    fun clearDynamicTools() {
+        _tools.removeAll { it is McpAgentTool }
+    }
 
     fun getRiskLevel(name: String?): RiskLevel =
-        tools.find { it.name == name }?.riskLevel ?: RiskLevel.Low
+        _tools.find { it.name == name }?.riskLevel ?: RiskLevel.Low
 
     suspend fun execute(name: String, argumentsJson: String): String {
-        val tool = tools.find { it.name == name }
+        val tool = _tools.find { it.name == name }
         return if (tool != null) {
             runCatching {
                 tool.execute(argumentsJson)

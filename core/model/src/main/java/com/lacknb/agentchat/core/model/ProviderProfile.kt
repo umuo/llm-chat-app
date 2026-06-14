@@ -11,6 +11,7 @@ data class ProviderProfile(
     val retrievalMode: RetrievalMode,
     val apiStyle: ApiStyle,
     val timeoutSeconds: Int = 60,
+    val mcpServerUrl: String = "",
     val enabled: Boolean = true,
 )
 
@@ -32,4 +33,5 @@ data class ProviderSettings(
     val retrievalMode: RetrievalMode = RetrievalMode.Keyword,
     val hasApiKey: Boolean = false,
     val maskedApiKey: String = "",
+    val mcpServerUrl: String = "",
 )

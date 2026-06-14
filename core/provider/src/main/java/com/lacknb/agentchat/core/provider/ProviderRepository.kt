@@ -25,6 +25,7 @@ class ProviderRepository(
         embeddingModel: String,
         rerankModel: String,
         retrievalMode: RetrievalMode,
+        mcpServerUrl: String,
     ): Result<Unit> = runCatching {
         val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
         val normalizedModel = model.trim()
@@ -48,6 +49,7 @@ class ProviderRepository(
             .putString(KeyEmbeddingModel, normalizedEmbeddingModel)
             .putString(KeyRerankModel, normalizedRerankModel)
             .putString(KeyRetrievalMode, retrievalMode.name)
+            .putString(KeyMcpServerUrl, mcpServerUrl.trim())
             .putBoolean(KeyHasApiKey, trimmedApiKey.isNotEmpty() || prefs.getBoolean(KeyHasApiKey, false))
             .apply()
 
@@ -66,6 +68,7 @@ class ProviderRepository(
             rerankModel = current.rerankModel,
             retrievalMode = current.retrievalMode,
             apiStyle = ApiStyle.ChatCompletions,
+            mcpServerUrl = current.mcpServerUrl,
         )
     }
 
@@ -85,6 +88,7 @@ class ProviderRepository(
                 ?: RetrievalMode.Keyword,
             hasApiKey = hasApiKey,
             maskedApiKey = if (hasApiKey) "••••" else "",
+            mcpServerUrl = prefs.getString(KeyMcpServerUrl, "") ?: "",
         )
     }
 
@@ -96,6 +100,7 @@ class ProviderRepository(
         const val KeyRerankModel = "rerank_model"
         const val KeyRetrievalMode = "retrieval_mode"
         const val KeyHasApiKey = "has_api_key"
+        const val KeyMcpServerUrl = "mcp_server_url"
         const val DefaultProviderId = "default"
         const val DefaultApiKeyRef = "default_api_key"
         const val DefaultBaseUrl = "https://newapi.lacknb.edu.kg/v1"
