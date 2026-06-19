@@ -15,7 +15,15 @@ final class AppStore: ObservableObject {
     @Published var conversations: [ConversationSnapshot] {
         didSet { save(conversations, key: Keys.conversations) }
     }
-    @Published var currentConversationID: UUID?
+    @Published var currentConversationID: UUID? {
+        didSet { save(currentConversationID, key: Keys.currentConversationID) }
+    }
+    @Published var lastChatConversationID: UUID? {
+        didSet { save(lastChatConversationID, key: Keys.lastChatConversationID) }
+    }
+    @Published var lastAgentConversationID: UUID? {
+        didSet { save(lastAgentConversationID, key: Keys.lastAgentConversationID) }
+    }
     @Published var memories: [MemoryItem] {
         didSet { save(memories, key: Keys.memories) }
     }
@@ -25,27 +33,47 @@ final class AppStore: ObservableObject {
     @Published var toolConfiguration: ToolConfiguration {
         didSet { save(toolConfiguration, key: Keys.tools) }
     }
-    @Published var chatMode: ChatMode = .chat
+    @Published var chatMode: ChatMode = .chat {
+        didSet { save(chatMode, key: Keys.chatMode) }
+    }
     @Published var agentPolicy: AgentPolicyType = .planning
     @Published var agentEvents: [AgentEvent] = []
     @Published var contextSummary: ContextSummary?
-    @Published var isStreaming = false
+    @Published var streamingConversations = Set<UUID>()
+    var isStreaming: Bool {
+        guard let id = currentConversationID else { return false }
+        return streamingConversations.contains(id)
+    }
     @Published var connectionStatus = ""
     @Published var availableModels: [String] = []
     @Published var selectedModelPickerTarget: ModelPickerTarget = .chat
 
     private let client = OpenAIClient()
-    private var generationTask: Task<Void, Never>?
+    private var generationTasks: [UUID: Task<Void, Never>] = [:]
 
     init() {
         settings = Self.load(ProviderSettings.self, key: Keys.settings) ?? ProviderSettings()
         apiKey = KeychainStore.read(Keys.apiKey)
         messages = Self.cleanDefaultMessages(Self.load([ChatMessage].self, key: Keys.messages) ?? [])
         conversations = Self.load([ConversationSnapshot].self, key: Keys.conversations) ?? []
-        currentConversationID = nil
         memories = Self.cleanDefaultMemories(Self.load([MemoryItem].self, key: Keys.memories) ?? [])
         prompts = Self.load([ManagedPrompt].self, key: Keys.prompts) ?? Self.samplePrompts
         toolConfiguration = Self.load(ToolConfiguration.self, key: Keys.tools) ?? ToolConfiguration()
+        
+        let lastConvId = Self.load(UUID?.self, key: Keys.currentConversationID) ?? nil
+        lastChatConversationID = Self.load(UUID?.self, key: Keys.lastChatConversationID) ?? nil
+        lastAgentConversationID = Self.load(UUID?.self, key: Keys.lastAgentConversationID) ?? nil
+
+        if let lastId = lastConvId, let conv = conversations.first(where: { $0.id == lastId }) {
+            currentConversationID = conv.id
+            chatMode = conv.selectedMode
+            contextSummary = conv.contextSummary
+            agentEvents = conv.agentEvents
+        } else {
+            currentConversationID = nil
+            chatMode = Self.load(ChatMode.self, key: Keys.chatMode) ?? .chat
+        }
+        
         contextSummary = nil
         save(messages, key: Keys.messages)
         save(memories, key: Keys.memories)
@@ -56,10 +84,17 @@ final class AppStore: ObservableObject {
 
     func send(_ text: String, attachments: [ChatAttachment], useWebSearch: Bool) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (!trimmed.isEmpty || !attachments.isEmpty), !isStreaming else { return }
+        guard (!trimmed.isEmpty || !attachments.isEmpty) else { return }
+        guard !isStreaming else { return }
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             messages.append(ChatMessage(role: .assistant, content: "请先在设置中配置 API Key。", status: .failed))
             return
+        }
+
+        let targetConversationID = currentConversationID ?? UUID()
+        if currentConversationID == nil {
+            currentConversationID = targetConversationID
+            persistCurrentConversation()
         }
 
         let attachmentText = attachments
@@ -79,8 +114,10 @@ final class AppStore: ObservableObject {
         messages.append(ChatMessage(id: assistantID, role: .assistant, content: "", status: .streaming))
         persistCurrentConversation()
 
-        if chatMode == .agent {
+        let activeChatMode = chatMode
+        if activeChatMode == .agent {
             runAgent(
+                conversationID: targetConversationID,
                 assistantID: assistantID,
                 requestMessages: messages.filter {
                     $0.id != assistantID && $0.status != .failed && !Self.isDefaultWelcomeMessage($0)
@@ -89,21 +126,22 @@ final class AppStore: ObservableObject {
             )
             return
         }
-        agentEvents = []
+        
+        updateConversation(id: targetConversationID) { _, events in events = [] }
+        streamingConversations.insert(targetConversationID)
 
-        isStreaming = true
         let requestMessages = messages.filter {
             $0.id != assistantID && $0.status != .failed && !Self.isDefaultWelcomeMessage($0)
         }
-        generationTask = Task {
+        let task = Task {
             do {
                 var accumulated = ""
-                let managedMessages = await prepareContextMessages(requestMessages, mode: .chat)
+                let managedMessages = await prepareContextMessages(requestMessages, mode: .chat, conversationID: targetConversationID)
                 let stream = client.streamChat(.init(
                     settings: settings,
                     apiKey: apiKey,
                     messages: managedMessages,
-                    mode: chatMode,
+                    mode: activeChatMode,
                     policy: agentPolicy,
                     memories: [],
                     useWebSearch: false
@@ -112,34 +150,36 @@ final class AppStore: ObservableObject {
                 for try await delta in stream {
                     if Task.isCancelled { break }
                     accumulated += delta
-                    updateAssistant(id: assistantID, content: accumulated, status: .streaming)
+                    updateAssistant(conversationID: targetConversationID, assistantID: assistantID, content: accumulated, status: .streaming)
                 }
 
-                updateAssistant(id: assistantID, content: accumulated, status: .complete)
-                if chatMode == .agent {
-                    agentEvents.append(AgentEvent(kind: .result, summary: "智能体已完成本轮输出。"))
-                }
+                updateAssistant(conversationID: targetConversationID, assistantID: assistantID, content: accumulated, status: .complete)
             } catch {
-                updateAssistant(id: assistantID, content: error.localizedDescription, status: .failed)
+                updateAssistant(conversationID: targetConversationID, assistantID: assistantID, content: error.localizedDescription, status: .failed)
             }
-            isStreaming = false
-            persistCurrentConversation()
+            streamingConversations.remove(targetConversationID)
+            generationTasks[targetConversationID] = nil
+            if self.currentConversationID == targetConversationID {
+                self.persistCurrentConversation()
+            }
         }
+        generationTasks[targetConversationID] = task
     }
 
     private func runAgent(
+        conversationID: UUID,
         assistantID: UUID,
         requestMessages: [ChatMessage],
         useWebSearch: Bool
     ) {
-        agentEvents = []
-
-        isStreaming = true
-        generationTask = Task {
+        updateConversation(id: conversationID) { _, events in events = [] }
+        streamingConversations.insert(conversationID)
+        
+        let task = Task {
             var assistantAccumulated = ""
 
             do {
-                let managedMessages = await prepareContextMessages(requestMessages, mode: .agent)
+                let managedMessages = await prepareContextMessages(requestMessages, mode: .agent, conversationID: conversationID)
                 var conversation = rawMessages(from: managedMessages)
                 for turn in 0..<5 {
                     var turnContent = ""
@@ -164,14 +204,16 @@ final class AppStore: ObservableObject {
                         case let .delta(text):
                             turnContent += text
                             assistantAccumulated += text
-                            updateAssistant(id: assistantID, content: assistantAccumulated, status: .streaming)
+                            updateAssistant(conversationID: conversationID, assistantID: assistantID, content: assistantAccumulated, status: .streaming)
                         case let .toolCallDelta(delta):
                             merge(delta, into: &toolCalls)
-                            syncToolCalls(toolCalls, contentOffset: assistantAccumulated.count, intoAssistantMessage: assistantID)
+                            syncToolCalls(conversationID: conversationID, toolCalls: toolCalls, contentOffset: assistantAccumulated.count, intoAssistantMessage: assistantID)
                             let announcementKey = delta.id ?? "\(delta.index):\(delta.name ?? "")"
                             if delta.name != nil && !announcedToolKeys.contains(announcementKey) {
                                 announcedToolKeys.insert(announcementKey)
-                                agentEvents.append(AgentEvent(kind: .action, summary: "模型请求工具：\(delta.name ?? "函数_\(delta.index)")"))
+                                updateConversation(id: conversationID) { _, events in
+                                    events.append(AgentEvent(kind: .action, summary: "模型请求工具：\(delta.name ?? "函数_\(delta.index)")"))
+                                }
                             }
                         }
                     }
@@ -182,12 +224,16 @@ final class AppStore: ObservableObject {
                         if !toolCalls.isEmpty {
                             let errorText = "\n\n模型返回了不完整的工具调用数据，缺少工具名称，已停止执行以避免误调用。"
                             assistantAccumulated += errorText
-                            updateAssistant(id: assistantID, content: assistantAccumulated, status: .failed)
-                            agentEvents.append(AgentEvent(kind: .result, summary: "工具调用数据不完整，已停止执行。"))
+                            updateAssistant(conversationID: conversationID, assistantID: assistantID, content: assistantAccumulated, status: .failed)
+                            updateConversation(id: conversationID) { _, events in
+                                events.append(AgentEvent(kind: .result, summary: "工具调用数据不完整，已停止执行。"))
+                            }
                             break
                         }
-                        agentEvents.append(AgentEvent(kind: .result, summary: "智能体运行结束，无需调用其他工具。"))
-                        updateAssistant(id: assistantID, content: assistantAccumulated, status: .complete)
+                        updateConversation(id: conversationID) { _, events in
+                            events.append(AgentEvent(kind: .result, summary: "智能体运行结束，无需调用其他工具。"))
+                        }
+                        updateAssistant(conversationID: conversationID, assistantID: assistantID, content: assistantAccumulated, status: .complete)
                         break
                     }
 
@@ -208,8 +254,10 @@ final class AppStore: ObservableObject {
 
                     for call in executableToolCalls.sorted(by: { $0.index < $1.index }) {
                         let result = await executeAgentTool(name: call.name, arguments: call.arguments)
-                        updateToolCallResult(assistantID: assistantID, call: call, result: result)
-                        agentEvents.append(AgentEvent(kind: .observation, summary: "工具运行结束：\(call.name)\n\(result.prefix(600))"))
+                        updateToolCallResult(conversationID: conversationID, assistantID: assistantID, call: call, result: result)
+                        updateConversation(id: conversationID) { _, events in
+                            events.append(AgentEvent(kind: .observation, summary: "工具运行结束：\(call.name)\n\(result.prefix(600))"))
+                        }
                         conversation.append([
                             "role": "tool",
                             "tool_call_id": call.id,
@@ -220,29 +268,52 @@ final class AppStore: ObservableObject {
                     if turn == 4 {
                         let limitText = "\n\n我在得出最终答案之前达到了工具调用次数上限。请缩小任务范围，或让我继续执行。"
                         assistantAccumulated += limitText
-                        updateAssistant(id: assistantID, content: assistantAccumulated, status: .complete)
+                        updateAssistant(conversationID: conversationID, assistantID: assistantID, content: assistantAccumulated, status: .complete)
                     }
                 }
             } catch {
-                updateAssistant(id: assistantID, content: error.localizedDescription, status: .failed)
+                updateAssistant(conversationID: conversationID, assistantID: assistantID, content: error.localizedDescription, status: .failed)
             }
-            isStreaming = false
-            persistCurrentConversation()
+            streamingConversations.remove(conversationID)
+            generationTasks[conversationID] = nil
+            if self.currentConversationID == conversationID {
+                self.persistCurrentConversation()
+            }
         }
+        generationTasks[conversationID] = task
     }
 
     func stopStreaming() {
-        generationTask?.cancel()
-        generationTask = nil
-        isStreaming = false
+        guard let id = currentConversationID, let task = generationTasks[id] else { return }
+        task.cancel()
+        generationTasks[id] = nil
+        streamingConversations.remove(id)
         if let index = messages.lastIndex(where: { $0.status == .streaming }) {
             messages[index].status = .complete
         }
         persistCurrentConversation()
     }
 
+    func switchMode(to newMode: ChatMode) {
+        if let id = currentConversationID {
+            if chatMode == .chat {
+                lastChatConversationID = id
+            } else {
+                lastAgentConversationID = id
+            }
+        }
+        
+        chatMode = newMode
+        
+        let targetID = newMode == .chat ? lastChatConversationID : lastAgentConversationID
+        if let id = targetID, let conv = conversations.first(where: { $0.id == id }) {
+            loadConversation(conv)
+        } else {
+            clearConversation()
+        }
+    }
+
     func clearConversation() {
-        stopStreaming()
         messages = []
         agentEvents = []
         contextSummary = nil
@@ -250,7 +321,6 @@ final class AppStore: ObservableObject {
     }
 
     func loadConversation(_ conversation: ConversationSnapshot) {
-        stopStreaming()
         currentConversationID = conversation.id
         chatMode = conversation.selectedMode
         messages = conversation.messages
@@ -263,6 +333,8 @@ final class AppStore: ObservableObject {
         if currentConversationID == conversation.id {
             clearConversation()
         }
+        if lastChatConversationID == conversation.id { lastChatConversationID = nil }
+        if lastAgentConversationID == conversation.id { lastAgentConversationID = nil }
     }
 
     func persistCurrentConversation() {
@@ -407,12 +479,19 @@ final class AppStore: ObservableObject {
         ]
     }
 
-    private func prepareContextMessages(_ sourceMessages: [ChatMessage], mode: ChatMode) async -> [ChatMessage] {
+    private func prepareContextMessages(_ sourceMessages: [ChatMessage], mode: ChatMode, conversationID: UUID) async -> [ChatMessage] {
         guard settings.contextCompressionEnabled else {
             return trimToContextBudget(sourceMessages)
         }
 
-        var messagesForContext = applyExistingContextSummary(to: sourceMessages)
+        var localContextSummary: ContextSummary?
+        if conversationID == currentConversationID {
+            localContextSummary = self.contextSummary
+        } else if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+            localContextSummary = self.conversations[index].contextSummary
+        }
+
+        var messagesForContext = applyExistingContextSummary(to: sourceMessages, localSummary: localContextSummary)
         let budget = contextInputBudget
         guard estimatedTokens(for: messagesForContext) > budget else {
             return messagesForContext
@@ -426,15 +505,21 @@ final class AppStore: ObservableObject {
         let messagesToSummarize = Array(sourceMessages.prefix(cutIndex))
         let keptMessages = Array(sourceMessages.dropFirst(cutIndex))
         do {
-            let summary = try await summarizeContext(messagesToSummarize, previousSummary: contextSummary?.summary, mode: mode)
-            contextSummary = ContextSummary(
+            let summary = try await summarizeContext(messagesToSummarize, previousSummary: localContextSummary?.summary, mode: mode)
+            let newSummary = ContextSummary(
                 summary: summary,
                 summarizedThroughMessageID: messagesToSummarize.last?.id,
                 tokensBefore: estimatedTokens(for: sourceMessages),
                 updatedAt: Date()
             )
+            
+            if conversationID == currentConversationID {
+                self.contextSummary = newSummary
+                persistCurrentConversation()
+            } else if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+                self.conversations[index].contextSummary = newSummary
+            }
             messagesForContext = [contextSummaryMessage(summary)] + keptMessages
-            persistCurrentConversation()
         } catch {
             messagesForContext = keptMessages
         }
@@ -446,8 +531,8 @@ final class AppStore: ObservableObject {
         max(1024, settings.contextWindowTokens - settings.contextReserveTokens)
     }
 
-    private func applyExistingContextSummary(to messages: [ChatMessage]) -> [ChatMessage] {
-        guard let contextSummary,
+    private func applyExistingContextSummary(to messages: [ChatMessage], localSummary: ContextSummary?) -> [ChatMessage] {
+        guard let contextSummary = localSummary,
               !contextSummary.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let summarizedID = contextSummary.summarizedThroughMessageID,
               let summarizedIndex = messages.firstIndex(where: { $0.id == summarizedID }) else {
@@ -587,10 +672,28 @@ final class AppStore: ObservableObject {
         return max(1, characters / 3)
     }
 
-    private func updateAssistant(id: UUID, content: String, status: MessageStatus) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].content = content
-        messages[index].status = status
+    private func updateConversation(id: UUID, _ block: (inout [ChatMessage], inout [AgentEvent]) -> Void) {
+        if id == currentConversationID {
+            var activeMessages = self.messages
+            var activeEvents = self.agentEvents
+            block(&activeMessages, &activeEvents)
+            self.messages = activeMessages
+            self.agentEvents = activeEvents
+        } else if let index = conversations.firstIndex(where: { $0.id == id }) {
+            var inactiveMessages = self.conversations[index].messages
+            var inactiveEvents = self.conversations[index].agentEvents
+            block(&inactiveMessages, &inactiveEvents)
+            self.conversations[index].messages = inactiveMessages
+            self.conversations[index].agentEvents = inactiveEvents
+        }
+    }
+
+    private func updateAssistant(conversationID: UUID, assistantID: UUID, content: String, status: MessageStatus) {
+        updateConversation(id: conversationID) { msgs, _ in
+            guard let index = msgs.firstIndex(where: { $0.id == assistantID }) else { return }
+            msgs[index].content = content
+            msgs[index].status = status
+        }
     }
 
     private func merge(_ delta: OpenAIClient.ToolCallDelta, into toolCalls: inout [AgentToolCall]) {
@@ -615,42 +718,46 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func syncToolCalls(_ toolCalls: [AgentToolCall], contentOffset: Int, intoAssistantMessage assistantID: UUID) {
-        guard let messageIndex = messages.firstIndex(where: { $0.id == assistantID }) else { return }
-        for call in toolCalls where call.name != "unknown_tool" {
-            let existingIndex = messages[messageIndex].toolCalls.firstIndex { messageCall in
-                messageCall.index == call.index || messageCall.externalID == call.id
-            }
-            if let existingIndex {
-                let currentResult = messages[messageIndex].toolCalls[existingIndex].result
-                let currentOffset = messages[messageIndex].toolCalls[existingIndex].contentOffset
-                messages[messageIndex].toolCalls[existingIndex] = ChatToolCall(
-                    id: messages[messageIndex].toolCalls[existingIndex].id,
-                    index: call.index,
-                    externalID: call.id,
-                    name: call.name,
-                    arguments: call.arguments,
-                    result: currentResult,
-                    contentOffset: currentOffset ?? contentOffset
-                )
-            } else {
-                messages[messageIndex].toolCalls.append(ChatToolCall(
-                    index: call.index,
-                    externalID: call.id,
-                    name: call.name,
-                    arguments: call.arguments,
-                    contentOffset: contentOffset
-                ))
+    private func syncToolCalls(conversationID: UUID, toolCalls: [AgentToolCall], contentOffset: Int, intoAssistantMessage assistantID: UUID) {
+        updateConversation(id: conversationID) { msgs, _ in
+            guard let messageIndex = msgs.firstIndex(where: { $0.id == assistantID }) else { return }
+            for call in toolCalls where call.name != "unknown_tool" {
+                let existingIndex = msgs[messageIndex].toolCalls.firstIndex { messageCall in
+                    messageCall.index == call.index || messageCall.externalID == call.id
+                }
+                if let existingIndex {
+                    let currentResult = msgs[messageIndex].toolCalls[existingIndex].result
+                    let currentOffset = msgs[messageIndex].toolCalls[existingIndex].contentOffset
+                    msgs[messageIndex].toolCalls[existingIndex] = ChatToolCall(
+                        id: msgs[messageIndex].toolCalls[existingIndex].id,
+                        index: call.index,
+                        externalID: call.id,
+                        name: call.name,
+                        arguments: call.arguments,
+                        result: currentResult,
+                        contentOffset: currentOffset ?? contentOffset
+                    )
+                } else {
+                    msgs[messageIndex].toolCalls.append(ChatToolCall(
+                        index: call.index,
+                        externalID: call.id,
+                        name: call.name,
+                        arguments: call.arguments,
+                        contentOffset: contentOffset
+                    ))
+                }
             }
         }
     }
 
-    private func updateToolCallResult(assistantID: UUID, call: AgentToolCall, result: String) {
-        guard let messageIndex = messages.firstIndex(where: { $0.id == assistantID }) else { return }
-        guard let toolIndex = messages[messageIndex].toolCalls.firstIndex(where: {
-            $0.index == call.index || $0.externalID == call.id
-        }) else { return }
-        messages[messageIndex].toolCalls[toolIndex].result = result
+    private func updateToolCallResult(conversationID: UUID, assistantID: UUID, call: AgentToolCall, result: String) {
+        updateConversation(id: conversationID) { msgs, _ in
+            guard let messageIndex = msgs.firstIndex(where: { $0.id == assistantID }) else { return }
+            guard let toolIndex = msgs[messageIndex].toolCalls.firstIndex(where: {
+                $0.index == call.index || $0.externalID == call.id
+            }) else { return }
+            msgs[messageIndex].toolCalls[toolIndex].result = result
+        }
     }
 
     private func save<T: Encodable>(_ value: T, key: String) {
@@ -672,6 +779,10 @@ private enum Keys {
     static let memories = "memories.v1"
     static let prompts = "prompts.v1"
     static let tools = "tools.v1"
+    static let chatMode = "chatMode.v1"
+    static let currentConversationID = "currentConversationID.v1"
+    static let lastChatConversationID = "lastChatConversationID.v1"
+    static let lastAgentConversationID = "lastAgentConversationID.v1"
 }
 
 enum ModelPickerTarget: String, CaseIterable, Identifiable {

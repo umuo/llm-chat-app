@@ -79,8 +79,8 @@ struct ChatView: View {
                 guard let item else { return }
                 Task { await importPhoto(item) }
             }
-            .onChange(of: store.chatMode) { _, mode in
-                if mode == .chat {
+            .onChange(of: store.chatMode) { oldValue, newValue in
+                if newValue == .chat {
                     useWebSearch = false
                 }
             }
@@ -89,7 +89,14 @@ struct ChatView: View {
 
     private var modeBar: some View {
         VStack(spacing: 10) {
-            Picker("模式", selection: $store.chatMode) {
+            Picker("模式", selection: Binding(
+                get: { store.chatMode },
+                set: { newMode in
+                    if store.chatMode != newMode {
+                        store.switchMode(to: newMode)
+                    }
+                }
+            )) {
                 Text("聊天").tag(ChatMode.chat)
                 Text("智能体").tag(ChatMode.agent)
             }
@@ -769,6 +776,7 @@ private struct ConversationHistorySheet: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var filter: ChatMode?
+    @State private var selection = Set<UUID>()
 
     private var conversations: [ConversationSnapshot] {
         guard let filter else { return store.conversations }
@@ -777,7 +785,7 @@ private struct ConversationHistorySheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List(selection: $selection) {
                 Picker("模式", selection: $filter) {
                     Text("全部").tag(ChatMode?.none)
                     Text("聊天").tag(ChatMode?.some(.chat))
@@ -806,6 +814,7 @@ private struct ConversationHistorySheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .tag(conversation.id)
                     .swipeActions {
                         Button(role: .destructive) {
                             store.deleteConversation(conversation)
@@ -817,11 +826,33 @@ private struct ConversationHistorySheet: View {
             }
             .navigationTitle("会话历史")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("完成") { dismiss() }
+                ToolbarItem(placement: .topBarLeading) {
+                    EditButton()
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
+                        if !selection.isEmpty {
+                            Button(role: .destructive) {
+                                deleteSelected()
+                            } label: {
+                                Text("删除(\(selection.count))")
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        Button("关闭") { dismiss() }
+                    }
                 }
             }
         }
+    }
+    
+    private func deleteSelected() {
+        for id in selection {
+            if let conv = store.conversations.first(where: { $0.id == id }) {
+                store.deleteConversation(conv)
+            }
+        }
+        selection.removeAll()
     }
 }
 
