@@ -74,14 +74,14 @@ struct ProviderSettings: Codable, Equatable {
     var temperature: Double = 0.7
     var topP: Double = 0.95
     var topK: Int = 40
-    var maxTokens: Int = 8192
+    var maxTokens: Int = 32768
     var timeoutSeconds: Int = 60
     var tavilyAPIKey: String = ""
     var mcpServerURL: String = ""
     var contextCompressionEnabled: Bool = true
-    var contextWindowTokens: Int = 32768
+    var contextWindowTokens: Int = 131072
     var contextReserveTokens: Int = 4096
-    var contextKeepRecentTokens: Int = 12000
+    var contextKeepRecentTokens: Int = 32768
 
     init() {}
 
@@ -96,14 +96,14 @@ struct ProviderSettings: Codable, Equatable {
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0.7
         topP = try container.decodeIfPresent(Double.self, forKey: .topP) ?? 0.95
         topK = try container.decodeIfPresent(Int.self, forKey: .topK) ?? 40
-        maxTokens = try container.decodeIfPresent(Int.self, forKey: .maxTokens) ?? 8192
+        maxTokens = try container.decodeIfPresent(Int.self, forKey: .maxTokens) ?? 32768
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds) ?? 60
         tavilyAPIKey = try container.decodeIfPresent(String.self, forKey: .tavilyAPIKey) ?? ""
         mcpServerURL = try container.decodeIfPresent(String.self, forKey: .mcpServerURL) ?? ""
         contextCompressionEnabled = try container.decodeIfPresent(Bool.self, forKey: .contextCompressionEnabled) ?? true
-        contextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .contextWindowTokens) ?? 32768
+        contextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .contextWindowTokens) ?? 131072
         contextReserveTokens = try container.decodeIfPresent(Int.self, forKey: .contextReserveTokens) ?? 4096
-        contextKeepRecentTokens = try container.decodeIfPresent(Int.self, forKey: .contextKeepRecentTokens) ?? 12000
+        contextKeepRecentTokens = try container.decodeIfPresent(Int.self, forKey: .contextKeepRecentTokens) ?? 32768
     }
 }
 

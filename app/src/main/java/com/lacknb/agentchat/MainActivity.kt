@@ -57,6 +57,7 @@ import com.lacknb.agentchat.tool.WriteFileTool
 import com.lacknb.agentchat.tool.EditFileTool
 import com.lacknb.agentchat.tool.ManageMemoryTool
 import com.lacknb.agentchat.tool.ManagePromptsTool
+import com.lacknb.agentchat.tool.TavilySearchTool
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeout
@@ -88,7 +89,8 @@ class MainActivity : ComponentActivity() {
                     providerRepository = providerRepository,
                     chatClient = chatClient,
                 ),
-                ManagePromptsTool(promptRepository)
+                ManagePromptsTool(promptRepository),
+                TavilySearchTool(providerRepository)
             )
         )
 
@@ -281,35 +283,8 @@ private suspend fun runAgentChatCompletion(
         )
     }
 
-    var finalGoal = goal
     val tavilyApiKey = providerRepository.settings.value.tavilyApiKey
-    if (useWebSearch && tavilyApiKey.isNotBlank()) {
-        emitEvent(
-            type = AgentEventType.Action,
-            summary = "模型请求工具：联网检索 (Tavily)",
-            payloadJson = "{\n  \"query\": \"$goal\"\n}"
-        )
-        try {
-            val tavilyClient = com.lacknb.agentchat.core.network.TavilyClient()
-            val searchResult = tavilyClient.search(tavilyApiKey, goal)
-            if (searchResult.context.isNotBlank()) {
-                finalGoal = "这是最新的网络检索资料：\n\n${searchResult.context}\n\n请结合上述资料回答我的问题：\n$goal"
-                val refList = searchResult.references.mapIndexed { index, ref -> "  ${index + 1}. ${ref.title} (${ref.url})" }.joinToString("\n")
-                val observationSummary = if (searchResult.references.isNotEmpty()) "获取到最新网络资料，参考了以下来源：\n$refList" else "获取到最新网络资料"
-                emitEvent(
-                    type = AgentEventType.Observation,
-                    summary = "工具运行结束：联网检索 (Tavily)",
-                    payloadJson = observationSummary
-                )
-            }
-        } catch (e: Exception) {
-            emitEvent(
-                type = AgentEventType.Observation,
-                summary = "联网检索失败: ${e.message}",
-                riskLevel = RiskLevel.High
-            )
-        }
-    }
+    val hasSearchTool = useWebSearch && tavilyApiKey.isNotBlank()
 
     val managedHistory = prepareContextMessages(
         sourceMessages = history,
@@ -320,7 +295,7 @@ private suspend fun runAgentChatCompletion(
         chatClient = chatClient,
         onContextSummaryChange = onContextSummaryChange,
     )
-    val conversation = buildAgentMessages(finalGoal, managedHistory).toMutableList()
+    val conversation = buildAgentMessages(goal, managedHistory, hasSearchTool).toMutableList()
 
     repeat(MaxAgentToolTurns) { turnIndex ->
         var emittedStreamingObservation = false
@@ -350,7 +325,9 @@ private suspend fun runAgentChatCompletion(
             topP = profile.topP.toDouble(),
             topK = if (profile.topK > 0) profile.topK else null,
             maxTokens = if (profile.maxTokens > 0) profile.maxTokens else null,
-            tools = toolRegistry.getAllDeclarations(),
+            tools = toolRegistry.getAllDeclarations().filter {
+                it.function.name != "tavily_search" || hasSearchTool
+            },
             toolChoice = "auto",
         )
 
@@ -814,6 +791,7 @@ private suspend fun streamChatCompletion(
 private fun buildAgentMessages(
     goal: String,
     history: List<ChatMessage>,
+    hasSearchTool: Boolean = false,
 ): List<ChatCompletionMessage> {
     val systemPrompt = """
         你是运行在智能体（Agent）模式下的 AgentChat。
@@ -827,7 +805,7 @@ private fun buildAgentMessages(
         如果需要使用工具，请直接进行工具调用。
         如果不需要使用工具，或者在获得工具返回的结果后，请直接给出最终的回答。
         请务必使用中文进行回复。
-    """.trimIndent()
+    """.trimIndent() + if (hasSearchTool) "\n\n用户开启了联网搜索。你必须首先调用网络搜索工具（如 tavily_search）来获取最新信息，然后再结合资料回答问题。" else ""
     val managedHistory = history
         .filter { message ->
             message.status == MessageStatus.Complete &&

@@ -74,16 +74,16 @@ struct SettingsView: View {
                 Section("模型参数") {
                     valueSlider("Temperature", value: $store.settings.temperature, range: 0...2)
                     valueSlider("Top P", value: $store.settings.topP, range: 0...1)
-                    Stepper("Top K: \(store.settings.topK)", value: $store.settings.topK, in: 1...200)
-                    Stepper("Max Tokens: \(store.settings.maxTokens)", value: $store.settings.maxTokens, in: 256...32768, step: 256)
-                    Stepper("Timeout: \(store.settings.timeoutSeconds)s", value: $store.settings.timeoutSeconds, in: 10...180, step: 5)
+                    editableStepper("Top K", value: $store.settings.topK, range: 1...200)
+                    editableStepper("Max Tokens", value: $store.settings.maxTokens, range: 256...131072, step: 256)
+                    editableStepper("Timeout(s)", value: $store.settings.timeoutSeconds, range: 10...600, step: 5)
                 }
 
                 Section("上下文管理") {
                     Toggle("自动上下文压缩", isOn: $store.settings.contextCompressionEnabled)
-                    Stepper("上下文窗口: \(store.settings.contextWindowTokens)", value: $store.settings.contextWindowTokens, in: 4096...262144, step: 4096)
-                    Stepper("预留输出: \(store.settings.contextReserveTokens)", value: $store.settings.contextReserveTokens, in: 1024...32768, step: 1024)
-                    Stepper("保留最近: \(store.settings.contextKeepRecentTokens)", value: $store.settings.contextKeepRecentTokens, in: 2048...65536, step: 1024)
+                    editableStepper("上下文窗口", value: $store.settings.contextWindowTokens, range: 4096...1048576, step: 4096)
+                    editableStepper("预留输出", value: $store.settings.contextReserveTokens, range: 1024...131072, step: 1024)
+                    editableStepper("保留最近", value: $store.settings.contextKeepRecentTokens, range: 2048...131072, step: 1024)
                     if let summary = store.contextSummary {
                         Text("已压缩到：\(summary.updatedAt.formatted(date: .abbreviated, time: .shortened)) · 原上下文约 \(summary.tokensBefore) tokens")
                             .font(.footnote)
@@ -210,6 +210,19 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: 0.05)
+        }
+    }
+
+    private func editableStepper(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, step: Int = 1) -> some View {
+        Stepper(value: value, in: range, step: step) {
+            HStack {
+                Text(title)
+                Spacer()
+                TextField("", value: value, format: .number)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

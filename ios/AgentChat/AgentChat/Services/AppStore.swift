@@ -154,7 +154,7 @@ final class AppStore: ObservableObject {
                         memories: memories,
                         useWebSearch: useWebSearch,
                         rawMessages: conversation,
-                        tools: agentToolDefinitions,
+                        tools: buildTools(useWebSearch: useWebSearch),
                         toolChoice: "auto"
                     ))
 
@@ -207,7 +207,7 @@ final class AppStore: ObservableObject {
                     ])
 
                     for call in executableToolCalls.sorted(by: { $0.index < $1.index }) {
-                        let result = executeAgentTool(name: call.name, arguments: call.arguments)
+                        let result = await executeAgentTool(name: call.name, arguments: call.arguments)
                         updateToolCallResult(assistantID: assistantID, call: call, result: result)
                         agentEvents.append(AgentEvent(kind: .observation, summary: "工具运行结束：\(call.name)\n\(result.prefix(600))"))
                         conversation.append([
@@ -731,8 +731,8 @@ private extension AppStore {
         message.role == .assistant && message.content == defaultWelcomeContent
     }
 
-    var agentToolDefinitions: [[String: Any]] {
-        [
+    func buildTools(useWebSearch: Bool) -> [[String: Any]] {
+        var tools: [[String: Any]] = [
             [
                 "type": "function",
                 "function": [
@@ -786,6 +786,25 @@ private extension AppStore {
                 ]
             ]
         ]
+        
+        if useWebSearch && !settings.tavilyAPIKey.isEmpty {
+            tools.append([
+                "type": "function",
+                "function": [
+                    "name": "tavily_search",
+                    "description": "联网检索工具。当需要获取最新的网络资料时，必须调用此工具。",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "query": ["type": "string", "description": "搜索关键词。"]
+                        ],
+                        "required": ["query"]
+                    ]
+                ]
+            ])
+        }
+        
+        return tools
     }
 
     func rawMessages(from messages: [ChatMessage]) -> [[String: Any]] {
@@ -810,13 +829,23 @@ private extension AppStore {
         }
     }
 
-    func executeAgentTool(name: String, arguments: String) -> String {
+    func executeAgentTool(name: String, arguments: String) async -> String {
         let args = parseJSONObject(arguments)
         switch name {
         case "manage_memory":
             return executeMemoryTool(args)
         case "manage_prompts":
             return executePromptsTool(args)
+        case "tavily_search":
+            guard let query = string(args["query"]), !query.isEmpty else {
+                return jsonString(["ok": false, "error": "query 不能为空"])
+            }
+            do {
+                let result = try await TavilyClient.search(query: query, apiKey: settings.tavilyAPIKey)
+                return jsonString(["ok": true, "result": result])
+            } catch {
+                return jsonString(["ok": false, "error": error.localizedDescription])
+            }
         default:
             return jsonString(["ok": false, "error": "未知工具：\(name)"])
         }
@@ -1081,5 +1110,65 @@ private extension MemoryType {
         case .summary:
             return "summary"
         }
+    }
+}
+
+enum TavilyClient {
+    static func search(query: String, apiKey: String) async throws -> String {
+        guard let url = URL(string: "https://api.tavily.com/search") else {
+            throw URLError(.badURL)
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = [
+            "api_key": apiKey,
+            "query": query,
+            "include_answer": true,
+            "max_results": 5
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let message = errorJson["detail"] as? String {
+                throw NSError(domain: "TavilyError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+            throw NSError(domain: "TavilyError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Search failed with status \(httpResponse.statusCode)"])
+        }
+        
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw URLError(.cannotParseResponse)
+        }
+        
+        var resultText = ""
+        
+        if let answer = json["answer"] as? String, !answer.isEmpty {
+            resultText += "【AI Answer】\n\(answer)\n\n"
+        }
+        
+        if let results = json["results"] as? [[String: Any]] {
+            resultText += "【Sources】\n"
+            for (index, res) in results.enumerated() {
+                let title = res["title"] as? String ?? "No title"
+                let url = res["url"] as? String ?? ""
+                let content = res["content"] as? String ?? ""
+                resultText += "\(index + 1). \(title) (\(url))\n\(content)\n\n"
+            }
+        }
+        
+        if resultText.isEmpty {
+            return "未能检索到相关内容。"
+        }
+        
+        return resultText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

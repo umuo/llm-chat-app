@@ -144,10 +144,18 @@ struct OpenAIClient {
             ], at: 0)
         }
 
-        if request.mode == .agent && request.useWebSearch {
+        let hasSearchTool = request.tools.contains { tool in
+            if let function = tool["function"] as? [String: Any],
+               let name = function["name"] as? String {
+                return name == "tavily_search" || name == "search_web" || name == "search"
+            }
+            return false
+        }
+
+        if request.mode == .agent && request.useWebSearch && hasSearchTool {
             messages.insert([
                 "role": "system",
-                "content": "用户开启了联网搜索。如果当前模型或服务端支持 web/search 工具，请优先结合最新信息；如果不支持，请说明需要配置 Tavily/MCP 工具后才能真正联网。"
+                "content": "用户开启了联网搜索。你必须首先调用网络搜索工具（如 tavily_search）来获取最新信息，然后再结合资料回答问题。"
             ], at: min(1, messages.count))
         }
 
