@@ -5,6 +5,7 @@ import com.lacknb.agentchat.core.harness.AgentEvent
 import com.lacknb.agentchat.core.harness.AgentEventType
 import com.lacknb.agentchat.core.harness.RiskLevel
 import com.lacknb.agentchat.core.model.ChatAttachment
+import com.lacknb.agentchat.core.model.ChatContextSummary
 import com.lacknb.agentchat.core.model.ChatMessage
 import com.lacknb.agentchat.core.model.ChatMode
 import com.lacknb.agentchat.core.model.ChatToolCall
@@ -29,6 +30,7 @@ data class ConversationDetail(
     val selectedMode: ChatMode,
     val messages: List<ChatMessage>,
     val agentEvents: Map<String, List<AgentEvent>>,
+    val contextSummary: ChatContextSummary? = null,
 )
 
 class ConversationHistoryManager(private val context: Context) {
@@ -57,7 +59,8 @@ class ConversationHistoryManager(private val context: Context) {
         id: String?,
         mode: ChatMode,
         messages: List<ChatMessage>,
-        agentEvents: Map<String, List<AgentEvent>>
+        agentEvents: Map<String, List<AgentEvent>>,
+        contextSummary: ChatContextSummary?,
     ): String {
         if (messages.isEmpty()) return id ?: UUID.randomUUID().toString()
 
@@ -70,7 +73,7 @@ class ConversationHistoryManager(private val context: Context) {
         }
         val timestamp = System.currentTimeMillis()
 
-        val detail = ConversationDetail(actualId, title, timestamp, mode, messages, agentEvents)
+        val detail = ConversationDetail(actualId, title, timestamp, mode, messages, agentEvents, contextSummary)
         val detailFile = File(historyDir, "$actualId.json")
         try {
             detailFile.writeText(detail.toJson().toString())
@@ -157,6 +160,7 @@ class ConversationHistoryManager(private val context: Context) {
             eventsObject.put(msgId, eventArray)
         }
         put("agentEvents", eventsObject)
+        put("contextSummary", contextSummary?.toJson())
     }
 
     private fun JSONObject.toConversationDetail(): ConversationDetail {
@@ -184,7 +188,9 @@ class ConversationHistoryManager(private val context: Context) {
             eventsMap[msgId] = eventList
         }
 
-        return ConversationDetail(id, title, timestamp, selectedMode, messagesList, eventsMap)
+        val contextSummary = optJSONObject("contextSummary")?.toChatContextSummary()
+
+        return ConversationDetail(id, title, timestamp, selectedMode, messagesList, eventsMap, contextSummary)
     }
 
     private fun ChatMessage.toJson(): JSONObject = JSONObject().apply {
@@ -264,6 +270,22 @@ class ConversationHistoryManager(private val context: Context) {
             id = if (isNull("id")) null else optString("id"),
             name = if (isNull("name")) null else optString("name"),
             arguments = getString("arguments"),
+        )
+    }
+
+    private fun ChatContextSummary.toJson(): JSONObject = JSONObject().apply {
+        put("summary", summary)
+        put("summarizedThroughMessageId", summarizedThroughMessageId)
+        put("tokensBefore", tokensBefore)
+        put("updatedAtMillis", updatedAtMillis)
+    }
+
+    private fun JSONObject.toChatContextSummary(): ChatContextSummary {
+        return ChatContextSummary(
+            summary = optString("summary"),
+            summarizedThroughMessageId = if (isNull("summarizedThroughMessageId")) null else optString("summarizedThroughMessageId"),
+            tokensBefore = optInt("tokensBefore", 0),
+            updatedAtMillis = optLong("updatedAtMillis", System.currentTimeMillis()),
         )
     }
 

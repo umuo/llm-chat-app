@@ -35,6 +35,13 @@ data class ChatToolCall(
     val arguments: String = "",
 )
 
+data class ChatContextSummary(
+    val summary: String,
+    val summarizedThroughMessageId: String?,
+    val tokensBefore: Int,
+    val updatedAtMillis: Long = System.currentTimeMillis(),
+)
+
 enum class MessageRole {
     User,
     Assistant,

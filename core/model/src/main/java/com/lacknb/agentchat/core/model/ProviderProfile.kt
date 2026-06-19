@@ -17,6 +17,10 @@ data class ProviderProfile(
     val topP: Float = 0.95f,
     val topK: Int = 40,
     val maxTokens: Int = 8192,
+    val contextCompressionEnabled: Boolean = true,
+    val contextWindowTokens: Int = 32768,
+    val contextReserveTokens: Int = 4096,
+    val contextKeepRecentTokens: Int = 12000,
 )
 
 enum class ApiStyle {
@@ -43,4 +47,8 @@ data class ProviderSettings(
     val topP: Float = 0.95f,
     val topK: Int = 40,
     val maxTokens: Int = 8192,
+    val contextCompressionEnabled: Boolean = true,
+    val contextWindowTokens: Int = 32768,
+    val contextReserveTokens: Int = 4096,
+    val contextKeepRecentTokens: Int = 12000,
 )

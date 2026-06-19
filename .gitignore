@@ -12,6 +12,8 @@ keystore/
 .DS_Store
 .idea/
 *.iml
+*.xcuserstate
+xcuserdata/
 
 # Agent files
 .agents/

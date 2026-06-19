@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -63,6 +64,12 @@ fun SettingsRoute(
     ) -> Result<Unit>,
     onTestConnection: suspend () -> Result<Unit>,
     onFetchModels: suspend (baseUrl: String, apiKey: String) -> Result<List<String>>,
+    onSaveContextSettings: (
+        enabled: Boolean,
+        contextWindowTokens: Int,
+        contextReserveTokens: Int,
+        contextKeepRecentTokens: Int,
+    ) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var baseUrl by rememberSaveable(settings.baseUrl) { androidx.compose.runtime.mutableStateOf(settings.baseUrl) }
@@ -83,6 +90,18 @@ fun SettingsRoute(
     var modelPickerTarget by rememberSaveable { androidx.compose.runtime.mutableStateOf(ModelPickerTarget.Chat) }
     var modelQuery by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var modelOptions by remember { androidx.compose.runtime.mutableStateOf<List<String>>(emptyList()) }
+    var contextCompressionEnabled by rememberSaveable(settings.contextCompressionEnabled) {
+        androidx.compose.runtime.mutableStateOf(settings.contextCompressionEnabled)
+    }
+    var contextWindowTokens by rememberSaveable(settings.contextWindowTokens) {
+        androidx.compose.runtime.mutableStateOf(settings.contextWindowTokens.toString())
+    }
+    var contextReserveTokens by rememberSaveable(settings.contextReserveTokens) {
+        androidx.compose.runtime.mutableStateOf(settings.contextReserveTokens.toString())
+    }
+    var contextKeepRecentTokens by rememberSaveable(settings.contextKeepRecentTokens) {
+        androidx.compose.runtime.mutableStateOf(settings.contextKeepRecentTokens.toString())
+    }
     var status by rememberSaveable(
         settings.hasApiKey,
         settings.baseUrl,
@@ -276,6 +295,70 @@ fun SettingsRoute(
                 }
             }
 
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                tonalElevation = 0.dp,
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "上下文管理",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = "超预算时摘要较早对话，保留最近消息原文。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = contextCompressionEnabled,
+                            onCheckedChange = { contextCompressionEnabled = it },
+                        )
+                    }
+                    ContextNumberField(
+                        label = "上下文窗口 tokens",
+                        value = contextWindowTokens,
+                        onValueChange = { contextWindowTokens = it.filter(Char::isDigit) },
+                    )
+                    ContextNumberField(
+                        label = "预留输出 tokens",
+                        value = contextReserveTokens,
+                        onValueChange = { contextReserveTokens = it.filter(Char::isDigit) },
+                    )
+                    ContextNumberField(
+                        label = "保留最近 tokens",
+                        value = contextKeepRecentTokens,
+                        onValueChange = { contextKeepRecentTokens = it.filter(Char::isDigit) },
+                    )
+                    FilledTonalButton(
+                        onClick = {
+                            onSaveContextSettings(
+                                contextCompressionEnabled,
+                                contextWindowTokens.toIntOrNull()?.coerceIn(4_096, 262_144) ?: settings.contextWindowTokens,
+                                contextReserveTokens.toIntOrNull()?.coerceIn(1_024, 32_768) ?: settings.contextReserveTokens,
+                                contextKeepRecentTokens.toIntOrNull()?.coerceIn(2_048, 65_536) ?: settings.contextKeepRecentTokens,
+                            )
+                            status = "上下文设置已保存"
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("保存上下文设置")
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -342,6 +425,22 @@ private fun ModelTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier,
+        label = { Text(label) },
+        singleLine = true,
+        shape = RoundedCornerShape(8.dp),
+    )
+}
+
+@Composable
+private fun ContextNumberField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
         label = { Text(label) },
         singleLine = true,
         shape = RoundedCornerShape(8.dp),

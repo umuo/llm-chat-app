@@ -78,6 +78,21 @@ class ProviderRepository(
         _settings.value = loadSettings()
     }
 
+    fun saveContextSettings(
+        enabled: Boolean,
+        contextWindowTokens: Int,
+        contextReserveTokens: Int,
+        contextKeepRecentTokens: Int,
+    ) {
+        prefs.edit()
+            .putBoolean(KeyContextCompressionEnabled, enabled)
+            .putInt(KeyContextWindowTokens, contextWindowTokens)
+            .putInt(KeyContextReserveTokens, contextReserveTokens)
+            .putInt(KeyContextKeepRecentTokens, contextKeepRecentTokens)
+            .apply()
+        _settings.value = loadSettings()
+    }
+
     fun currentProfile(): ProviderProfile {
         val current = settings.value
         return ProviderProfile(
@@ -95,6 +110,10 @@ class ProviderRepository(
             topP = current.topP,
             topK = current.topK,
             maxTokens = current.maxTokens,
+            contextCompressionEnabled = current.contextCompressionEnabled,
+            contextWindowTokens = current.contextWindowTokens,
+            contextReserveTokens = current.contextReserveTokens,
+            contextKeepRecentTokens = current.contextKeepRecentTokens,
         )
     }
 
@@ -120,6 +139,10 @@ class ProviderRepository(
             topP = prefs.getFloat(KeyTopP, 0.95f),
             topK = prefs.getInt(KeyTopK, 40),
             maxTokens = prefs.getInt(KeyMaxTokens, 8192),
+            contextCompressionEnabled = prefs.getBoolean(KeyContextCompressionEnabled, true),
+            contextWindowTokens = prefs.getInt(KeyContextWindowTokens, 32768),
+            contextReserveTokens = prefs.getInt(KeyContextReserveTokens, 4096),
+            contextKeepRecentTokens = prefs.getInt(KeyContextKeepRecentTokens, 12000),
         )
     }
 
@@ -137,6 +160,10 @@ class ProviderRepository(
         const val KeyTopP = "llm_top_p"
         const val KeyTopK = "llm_top_k"
         const val KeyMaxTokens = "llm_max_tokens"
+        const val KeyContextCompressionEnabled = "context_compression_enabled"
+        const val KeyContextWindowTokens = "context_window_tokens"
+        const val KeyContextReserveTokens = "context_reserve_tokens"
+        const val KeyContextKeepRecentTokens = "context_keep_recent_tokens"
         const val DefaultProviderId = "default"
         const val DefaultApiKeyRef = "default_api_key"
         const val DefaultBaseUrl = "https://newapi.lacknb.edu.kg/v1"

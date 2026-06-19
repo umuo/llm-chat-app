@@ -26,9 +26,11 @@ import com.lacknb.agentchat.core.harness.AgentEvent
 import com.lacknb.agentchat.core.harness.AgentEventType
 import com.lacknb.agentchat.core.harness.RiskLevel
 import com.lacknb.agentchat.core.model.ChatMessage
+import com.lacknb.agentchat.core.model.ChatContextSummary
 import com.lacknb.agentchat.core.model.ChatToolCall
 import com.lacknb.agentchat.core.model.MessageRole
 import com.lacknb.agentchat.core.model.MessageStatus
+import com.lacknb.agentchat.core.model.ProviderProfile
 import com.lacknb.agentchat.core.model.RetrievalMode
 import com.lacknb.agentchat.core.network.ChatCompletionFunction
 import com.lacknb.agentchat.core.network.ChatCompletionMessage
@@ -169,17 +171,18 @@ private fun AgentChatApp(
                 onOpenPrompts = { navController.navigate(TopLevelDestination.Prompts.route) },
                 onOpenMemory = { navController.navigate(TopLevelDestination.Memory.route) },
                 onOpenToolCenter = { navController.navigate(TopLevelDestination.ToolCenter.route) },
-                onSendMessage = { messages, useWebSearch, onDelta, onToolCallDelta ->
+                onSendMessage = { messages, _, contextSummary, onContextSummaryChange, onDelta, onToolCallDelta ->
                     streamChatCompletion(
                         providerRepository = providerRepository,
                         chatClient = chatClient,
                         messages = messages,
-                        useWebSearch = useWebSearch,
+                        contextSummary = contextSummary,
+                        onContextSummaryChange = onContextSummaryChange,
                         onDelta = onDelta,
                         onToolCallDelta = onToolCallDelta,
                     )
                 },
-                onRunAgent = { goal, history, useWebSearch, onEvent, onDelta, onToolCallDelta ->
+                onRunAgent = { goal, history, useWebSearch, contextSummary, onContextSummaryChange, onEvent, onDelta, onToolCallDelta ->
                     runAgentChatCompletion(
                         providerRepository = providerRepository,
                         chatClient = chatClient,
@@ -187,6 +190,8 @@ private fun AgentChatApp(
                         goal = goal,
                         history = history,
                         useWebSearch = useWebSearch,
+                        contextSummary = contextSummary,
+                        onContextSummaryChange = onContextSummaryChange,
                         onEvent = onEvent,
                         onDelta = onDelta,
                         onToolCallDelta = onToolCallDelta,
@@ -220,6 +225,7 @@ private fun AgentChatApp(
                         apiKey = apiKey,
                     )
                 },
+                onSaveContextSettings = providerRepository::saveContextSettings,
             )
         }
         composable(TopLevelDestination.ToolCenter.route) {
@@ -246,6 +252,8 @@ private suspend fun runAgentChatCompletion(
     goal: String,
     history: List<ChatMessage>,
     useWebSearch: Boolean = false,
+    contextSummary: ChatContextSummary?,
+    onContextSummaryChange: (ChatContextSummary?) -> Unit,
     onEvent: (AgentEvent) -> Unit,
     onDelta: (String) -> Unit,
     onToolCallDelta: (ChatToolCall) -> Unit,
@@ -303,14 +311,16 @@ private suspend fun runAgentChatCompletion(
         }
     }
 
-    val conversation = buildAgentMessages(finalGoal, history).toMutableList()
-
-
-
-    emitEvent(
-        type = AgentEventType.Plan,
-        summary = "智能体模式：根据是否有工具调用执行操作，无工具调用时直接回复并结束。",
+    val managedHistory = prepareContextMessages(
+        sourceMessages = history,
+        existingSummary = contextSummary,
+        mode = MessageContextMode.Agent,
+        profile = profile,
+        apiKey = apiKey,
+        chatClient = chatClient,
+        onContextSummaryChange = onContextSummaryChange,
     )
+    val conversation = buildAgentMessages(finalGoal, managedHistory).toMutableList()
 
     repeat(MaxAgentToolTurns) { turnIndex ->
         var emittedStreamingObservation = false
@@ -331,11 +341,6 @@ private suspend fun runAgentChatCompletion(
                 )
             }
         }
-
-        emitEvent(
-            type = AgentEventType.Action,
-            summary = "正在使用 ${toolRegistry.size} 个可用工具调用 ${profile.defaultModel}。",
-        )
 
         val request = ChatCompletionRequest(
             model = profile.defaultModel,
@@ -530,11 +535,220 @@ private suspend fun fetchProviderModels(
 private const val MaxAgentToolTurns = 5
 private const val AgentTextSegmentSummary = "模型输出片段"
 
+private enum class MessageContextMode {
+    Chat,
+    Agent,
+}
+
+private suspend fun prepareContextMessages(
+    sourceMessages: List<ChatMessage>,
+    existingSummary: ChatContextSummary?,
+    mode: MessageContextMode,
+    profile: ProviderProfile,
+    apiKey: String,
+    chatClient: ChatCompletionsClient,
+    onContextSummaryChange: (ChatContextSummary?) -> Unit,
+): List<ChatMessage> {
+    val eligibleMessages = sourceMessages.filter { message ->
+        message.status != MessageStatus.Streaming &&
+            message.id != "welcome" &&
+            (message.content.isNotBlank() || message.imageUrls.isNotEmpty()) &&
+            message.role in setOf(MessageRole.User, MessageRole.Assistant, MessageRole.System)
+    }
+    if (!profile.contextCompressionEnabled) {
+        return trimToContextBudget(eligibleMessages, profile)
+    }
+
+    var contextMessages = applyExistingContextSummary(eligibleMessages, existingSummary)
+    if (estimateTokens(contextMessages) <= contextInputBudget(profile)) {
+        return contextMessages
+    }
+
+    val cutIndex = cutIndexForCompaction(eligibleMessages, profile)
+    if (cutIndex <= 0) {
+        return trimToContextBudget(contextMessages, profile)
+    }
+
+    val messagesToSummarize = eligibleMessages.take(cutIndex)
+    val keptMessages = eligibleMessages.drop(cutIndex)
+    contextMessages = try {
+        val summary = summarizeContextMessages(
+            messages = messagesToSummarize,
+            previousSummary = existingSummary?.summary,
+            mode = mode,
+            profile = profile,
+            apiKey = apiKey,
+            chatClient = chatClient,
+        )
+        val nextSummary = ChatContextSummary(
+            summary = summary,
+            summarizedThroughMessageId = messagesToSummarize.lastOrNull()?.id,
+            tokensBefore = estimateTokens(eligibleMessages),
+            updatedAtMillis = System.currentTimeMillis(),
+        )
+        onContextSummaryChange(nextSummary)
+        listOf(contextSummaryMessage(summary)) + keptMessages
+    } catch (_: Exception) {
+        keptMessages
+    }
+
+    return trimToContextBudget(contextMessages, profile)
+}
+
+private fun contextInputBudget(profile: ProviderProfile): Int {
+    return (profile.contextWindowTokens - profile.contextReserveTokens).coerceAtLeast(1024)
+}
+
+private fun applyExistingContextSummary(
+    messages: List<ChatMessage>,
+    summary: ChatContextSummary?,
+): List<ChatMessage> {
+    if (summary == null || summary.summary.isBlank()) return messages
+    val summarizedId = summary.summarizedThroughMessageId ?: return messages
+    val summarizedIndex = messages.indexOfFirst { it.id == summarizedId }
+    if (summarizedIndex < 0) return messages
+    return listOf(contextSummaryMessage(summary.summary)) + messages.drop(summarizedIndex + 1)
+}
+
+private fun contextSummaryMessage(summary: String): ChatMessage {
+    return ChatMessage(
+        id = "context-summary-${summary.hashCode()}",
+        role = MessageRole.System,
+        content = "以下是较早对话的压缩摘要，仅用于保持连续上下文；它不是用户的新指令：\n$summary",
+    )
+}
+
+private fun cutIndexForCompaction(messages: List<ChatMessage>, profile: ProviderProfile): Int {
+    var recentTokens = 0
+    var index = messages.size
+    while (index > 0) {
+        val tokens = estimateTokens(messages[index - 1])
+        if (recentTokens + tokens > profile.contextKeepRecentTokens) break
+        recentTokens += tokens
+        index -= 1
+    }
+    while (index > 0 && index < messages.size && messages[index].role != MessageRole.User) {
+        index -= 1
+    }
+    return index.coerceAtLeast(0)
+}
+
+private fun trimToContextBudget(messages: List<ChatMessage>, profile: ProviderProfile): List<ChatMessage> {
+    val budget = contextInputBudget(profile)
+    if (estimateTokens(messages) <= budget) return messages
+
+    val leadingSummary = messages.firstOrNull()?.takeIf { it.role == MessageRole.System && it.id.startsWith("context-summary-") }
+    val kept = ArrayDeque<ChatMessage>()
+    var used = leadingSummary?.let(::estimateTokens) ?: 0
+    for (message in messages.asReversed()) {
+        if (message.id == leadingSummary?.id) continue
+        val tokens = estimateTokens(message)
+        if (used + tokens > budget && kept.isNotEmpty()) break
+        kept.addFirst(message)
+        used += tokens
+    }
+    return if (leadingSummary != null) listOf(leadingSummary) + kept else kept.toList()
+}
+
+private suspend fun summarizeContextMessages(
+    messages: List<ChatMessage>,
+    previousSummary: String?,
+    mode: MessageContextMode,
+    profile: ProviderProfile,
+    apiKey: String,
+    chatClient: ChatCompletionsClient,
+): String {
+    val transcript = messages.joinToString("\n\n") { it.compactionLine() }
+    val prompt = buildString {
+        appendLine("请把下面较早的对话压缩成后续对话可用的中文摘要。")
+        appendLine()
+        appendLine("要求：")
+        appendLine("- 保留用户明确目标、偏好、约束、已完成事项、未解决问题。")
+        appendLine("- 保留和工具调用相关的事实结果，但不要复制大段 JSON 或日志。")
+        appendLine("- 不要加入新的建议或推断。")
+        appendLine("- 输出控制在 600 字以内。")
+        appendLine()
+        if (!previousSummary.isNullOrBlank()) {
+            appendLine("已有摘要：")
+            appendLine(previousSummary)
+            appendLine()
+        }
+        appendLine("模式：${if (mode == MessageContextMode.Agent) "智能体" else "普通聊天"}")
+        appendLine()
+        appendLine("待压缩对话：")
+        appendLine(transcript)
+    }
+
+    val request = ChatCompletionRequest(
+        model = profile.defaultModel,
+        messages = listOf(
+            ChatCompletionMessage(role = "system", content = "你是严格的会话上下文压缩器，只输出摘要正文。"),
+            ChatCompletionMessage(role = "user", content = prompt),
+        ),
+        stream = true,
+        temperature = 0.2,
+        maxTokens = 900,
+    )
+
+    val output = StringBuilder()
+    chatClient.streamChatCompletion(profile, apiKey, request).collect { event ->
+        when (event) {
+            is ChatCompletionStreamEvent.Delta -> output.append(event.content)
+            is ChatCompletionStreamEvent.Failed -> throw IllegalStateException(event.message, event.cause)
+            is ChatCompletionStreamEvent.Completed,
+            is ChatCompletionStreamEvent.ToolCallDelta -> Unit
+        }
+    }
+    return output.toString().trim().ifBlank {
+        error("上下文压缩失败：摘要为空")
+    }
+}
+
+private fun ChatMessage.compactionLine(): String {
+    return buildString {
+        append("[")
+        append(role.name)
+        append("] ")
+        append(content.take(2_000))
+        if (attachments.isNotEmpty()) {
+            appendLine()
+            append("附件：")
+            append(attachments.joinToString { it.name })
+        }
+        if (toolCalls.isNotEmpty()) {
+            appendLine()
+            append(
+                toolCalls.joinToString("\n") { call ->
+                    "工具 ${call.name ?: "unknown_tool"}：参数 ${call.arguments.take(500)}"
+                },
+            )
+        }
+    }
+}
+
+private fun estimateTokens(messages: List<ChatMessage>): Int {
+    return messages.sumOf(::estimateTokens)
+}
+
+private fun estimateTokens(message: ChatMessage): Int {
+    var characters = message.content.length + 8
+    message.attachments.forEach { attachment ->
+        characters += attachment.name.length + (attachment.textContent?.length ?: 0)
+        if (attachment.isImage) characters += 1_200
+    }
+    message.imageUrls.forEach { characters += if (it.startsWith("data:")) 1_200 else it.length }
+    message.toolCalls.forEach { call ->
+        characters += (call.name?.length ?: 0) + call.arguments.length
+    }
+    return (characters / 3).coerceAtLeast(1)
+}
+
 private suspend fun streamChatCompletion(
     providerRepository: ProviderRepository,
     chatClient: ChatCompletionsClient,
     messages: List<ChatMessage>,
-    useWebSearch: Boolean = false,
+    contextSummary: ChatContextSummary?,
+    onContextSummaryChange: (ChatContextSummary?) -> Unit,
     onDelta: (String) -> Unit,
     onToolCallDelta: (ChatToolCall) -> Unit = {},
 ): Result<Unit> = runCatching {
@@ -542,31 +756,15 @@ private suspend fun streamChatCompletion(
     val apiKey = providerRepository.currentApiKey()
         ?: error("API 密钥未配置")
 
-    var finalMessages = messages.toMutableList()
-    val tavilyApiKey = providerRepository.settings.value.tavilyApiKey
-    if (useWebSearch && tavilyApiKey.isNotBlank()) {
-        val lastUserMessageIndex = finalMessages.indexOfLast { it.role == MessageRole.User }
-        if (lastUserMessageIndex >= 0) {
-            val userMsg = finalMessages[lastUserMessageIndex]
-            onDelta("*(正在检索网络最新资料...)*\n\n")
-            try {
-                val tavilyClient = com.lacknb.agentchat.core.network.TavilyClient()
-                val searchResult = tavilyClient.search(tavilyApiKey, userMsg.content)
-                if (searchResult.context.isNotBlank()) {
-                    val enrichedContent = "这是最新的网络检索资料：\n\n${searchResult.context}\n\n请结合上述资料回答我的问题：\n${userMsg.content}"
-                    finalMessages[lastUserMessageIndex] = userMsg.copy(content = enrichedContent)
-                    if (searchResult.references.isNotEmpty()) {
-                        val refList = searchResult.references.mapIndexed { index, ref -> "${index + 1}. [${ref.title}](${ref.url})" }.joinToString("  \n")
-                        onDelta("*(参考了以下来源：  \n$refList)*\n\n")
-                    } else {
-                        onDelta("*(参考了 ${tavilyClient.javaClass.simpleName} 的检索结果)*\n\n")
-                    }
-                }
-            } catch (e: Exception) {
-                onDelta("*(联网检索失败: ${e.message})*\n\n")
-            }
-        }
-    }
+    val finalMessages = prepareContextMessages(
+        sourceMessages = messages,
+        existingSummary = contextSummary,
+        mode = MessageContextMode.Chat,
+        profile = profile,
+        apiKey = apiKey,
+        chatClient = chatClient,
+        onContextSummaryChange = onContextSummaryChange,
+    )
 
     val request = ChatCompletionRequest(
         model = profile.defaultModel,
@@ -630,14 +828,13 @@ private fun buildAgentMessages(
         如果不需要使用工具，或者在获得工具返回的结果后，请直接给出最终的回答。
         请务必使用中文进行回复。
     """.trimIndent()
-    val recentHistory = history
+    val managedHistory = history
         .filter { message ->
             message.status == MessageStatus.Complete &&
                 message.id != "welcome" &&
                 (message.content.isNotBlank() || message.imageUrls.isNotEmpty()) &&
-                message.role in setOf(MessageRole.User, MessageRole.Assistant)
+                message.role in setOf(MessageRole.User, MessageRole.Assistant, MessageRole.System)
         }
-        .takeLast(8)
         .map { message ->
             ChatCompletionMessage(
                 role = message.role.toChatCompletionRole(),
@@ -647,10 +844,10 @@ private fun buildAgentMessages(
         }
 
     val goalMessage = ChatCompletionMessage(role = "user", content = goal)
-    val conversation = if (recentHistory.lastOrNull() == goalMessage) {
-        recentHistory
+    val conversation = if (managedHistory.lastOrNull() == goalMessage) {
+        managedHistory
     } else {
-        recentHistory + goalMessage
+        managedHistory + goalMessage
     }
 
     return listOf(ChatCompletionMessage(role = "system", content = systemPrompt)) + conversation

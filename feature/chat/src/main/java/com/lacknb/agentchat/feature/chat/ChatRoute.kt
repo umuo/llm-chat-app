@@ -110,6 +110,7 @@ import androidx.compose.material.icons.filled.Image
 import android.net.Uri
 import android.content.Context
 import com.lacknb.agentchat.core.model.ChatAttachment
+import com.lacknb.agentchat.core.model.ChatContextSummary
 import kotlinx.coroutines.Dispatchers
 
 @kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -123,6 +124,8 @@ fun ChatRoute(
     onSendMessage: suspend (
         messages: List<ChatMessage>,
         useWebSearch: Boolean,
+        contextSummary: ChatContextSummary?,
+        onContextSummaryChange: (ChatContextSummary?) -> Unit,
         onDelta: (String) -> Unit,
         onToolCallDelta: (ChatToolCall) -> Unit,
     ) -> Result<Unit>,
@@ -130,6 +133,8 @@ fun ChatRoute(
         goal: String,
         history: List<ChatMessage>,
         useWebSearch: Boolean,
+        contextSummary: ChatContextSummary?,
+        onContextSummaryChange: (ChatContextSummary?) -> Unit,
         onEvent: (AgentEvent) -> Unit,
         onDelta: (String) -> Unit,
         onToolCallDelta: (ChatToolCall) -> Unit,
@@ -148,6 +153,7 @@ fun ChatRoute(
     val listState = rememberLazyListState()
     val agentEventsByMessage = remember { mutableStateMapOf<String, List<AgentEvent>>() }
     val messages = remember { mutableStateListOf<ChatMessage>() }
+    var contextSummary by remember { androidx.compose.runtime.mutableStateOf<ChatContextSummary?>(null) }
     val selectedAttachments = remember { androidx.compose.runtime.mutableStateListOf<ChatAttachment>() }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -243,7 +249,8 @@ fun ChatRoute(
             currentConversationId,
             selectedMode,
             messages.toList(),
-            agentEventsByMessage.toMap()
+            agentEventsByMessage.toMap(),
+            contextSummary,
         )
         currentConversationId = savedId
     }
@@ -254,6 +261,7 @@ fun ChatRoute(
         isSending = false
         messages.clear()
         agentEventsByMessage.clear()
+        contextSummary = null
         currentConversationId = null
     }
 
@@ -296,7 +304,8 @@ fun ChatRoute(
             currentConversationId,
             selectedMode,
             messages.toList(),
-            agentEventsByMessage.toMap()
+            agentEventsByMessage.toMap(),
+            contextSummary,
         )
         currentConversationId = savedId
 
@@ -305,6 +314,8 @@ fun ChatRoute(
                 onSendMessage(
                     messages.toList(),
                     useWebSearch,
+                    contextSummary,
+                    { summary -> contextSummary = summary },
                     { delta ->
                         messages.updateMessage(assistantId) { message ->
                             message.copy(content = message.content + delta)
@@ -321,6 +332,8 @@ fun ChatRoute(
                     finalContent,
                     messages.toList(),
                     useWebSearch,
+                    contextSummary,
+                    { summary -> contextSummary = summary },
                     { event ->
                         agentEventsByMessage[assistantId] = agentEventsByMessage[assistantId].orEmpty() + event
                     },
@@ -367,7 +380,8 @@ fun ChatRoute(
                 currentConversationId,
                 selectedMode,
                 messages.toList(),
-                agentEventsByMessage.toMap()
+                agentEventsByMessage.toMap(),
+                contextSummary,
             )
             currentConversationId = finalSavedId
         }
@@ -394,7 +408,8 @@ fun ChatRoute(
             currentConversationId,
             selectedMode,
             messages.toList(),
-            agentEventsByMessage.toMap()
+            agentEventsByMessage.toMap(),
+            contextSummary,
         )
         currentConversationId = savedId
 
@@ -403,6 +418,8 @@ fun ChatRoute(
                 onSendMessage(
                     messages.toList(),
                     useWebSearch,
+                    contextSummary,
+                    { summary -> contextSummary = summary },
                     { delta ->
                         messages.updateMessage(newAssistantId) { message ->
                             message.copy(content = message.content + delta)
@@ -419,6 +436,8 @@ fun ChatRoute(
                     previousUserMessage.content,
                     messages.toList(),
                     useWebSearch,
+                    contextSummary,
+                    { summary -> contextSummary = summary },
                     { event ->
                         agentEventsByMessage[newAssistantId] = agentEventsByMessage[newAssistantId].orEmpty() + event
                     },
@@ -465,7 +484,8 @@ fun ChatRoute(
                 currentConversationId,
                 selectedMode,
                 messages.toList(),
-                agentEventsByMessage.toMap()
+                agentEventsByMessage.toMap(),
+                contextSummary,
             )
             currentConversationId = finalSavedId
         }
@@ -727,6 +747,7 @@ fun ChatRoute(
                     messages.addAll(detail.messages)
                     agentEventsByMessage.clear()
                     agentEventsByMessage.putAll(detail.agentEvents)
+                    contextSummary = detail.contextSummary
                     selectedMode = detail.selectedMode
                     currentConversationId = detail.id
                     shouldAutoScroll = true
