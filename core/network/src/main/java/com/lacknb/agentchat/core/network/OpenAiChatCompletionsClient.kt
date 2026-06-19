@@ -399,6 +399,10 @@ private fun ChatCompletionRequest.toJson(): JSONObject {
         }
 }
 
+private fun JSONObject.optStringSafe(key: String): String? {
+    return if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+}
+
 private fun JSONObject.toChatCompletionChunk(): ChatCompletionChunk {
     val choicesJson = optJSONArray("choices") ?: JSONArray()
     val choices = buildList {
@@ -407,22 +411,22 @@ private fun JSONObject.toChatCompletionChunk(): ChatCompletionChunk {
             add(
                 ChatCompletionChoice(
                     delta = choiceJson.optJSONObject("delta")?.toChatCompletionDelta(),
-                    finishReason = choiceJson.optString("finish_reason").takeIf { it.isNotBlank() },
+                    finishReason = choiceJson.optStringSafe("finish_reason"),
                 ),
             )
         }
     }
 
     return ChatCompletionChunk(
-        id = optString("id").takeIf { it.isNotBlank() },
+        id = optStringSafe("id"),
         choices = choices,
     )
 }
 
 private fun JSONObject.toChatCompletionDelta(): ChatCompletionDelta {
     return ChatCompletionDelta(
-        role = optString("role").takeIf { it.isNotBlank() },
-        content = optString("content").takeIf { it.isNotBlank() },
+        role = optStringSafe("role"),
+        content = optStringSafe("content"),
         toolCalls = optJSONArray("tool_calls")?.toToolCallDeltas().orEmpty(),
     )
 }
@@ -435,10 +439,10 @@ private fun JSONArray.toToolCallDeltas(): List<ChatCompletionToolCallDelta> {
             add(
                 ChatCompletionToolCallDelta(
                     index = toolJson.optInt("index", index),
-                    id = toolJson.optString("id").takeIf { it.isNotBlank() },
-                    type = toolJson.optString("type").takeIf { it.isNotBlank() },
-                    functionName = functionJson?.optString("name")?.takeIf { it.isNotBlank() },
-                    arguments = functionJson?.optString("arguments").orEmpty(),
+                    id = toolJson.optStringSafe("id"),
+                    type = toolJson.optStringSafe("type"),
+                    functionName = functionJson?.optStringSafe("name"),
+                    arguments = if (functionJson?.isNull("arguments") == true) "" else functionJson?.optString("arguments").orEmpty(),
                 ),
             )
         }
