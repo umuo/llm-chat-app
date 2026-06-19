@@ -113,6 +113,14 @@ import com.lacknb.agentchat.core.model.ChatAttachment
 import com.lacknb.agentchat.core.model.ChatContextSummary
 import kotlinx.coroutines.Dispatchers
 
+class ChatSession(
+    val id: String,
+    var mode: ChatMode,
+    val messages: androidx.compose.runtime.snapshots.SnapshotStateList<ChatMessage> = androidx.compose.runtime.mutableStateListOf(),
+    val agentEventsByMessage: androidx.compose.runtime.snapshots.SnapshotStateMap<String, List<AgentEvent>> = androidx.compose.runtime.mutableStateMapOf(),
+    var contextSummary: ChatContextSummary? = null,
+)
+
 @kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatRoute(
@@ -149,12 +157,44 @@ fun ChatRoute(
     var useWebSearch by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     var historySummaries by remember { androidx.compose.runtime.mutableStateOf(historyManager.getSummaries()) }
 
+    val sharedPrefs = context.getSharedPreferences("AgentChatPrefs", Context.MODE_PRIVATE)
+    var lastChatConversationId by remember { androidx.compose.runtime.mutableStateOf(sharedPrefs.getString("lastChatConversationId", null)) }
+    var lastAgentConversationId by remember { androidx.compose.runtime.mutableStateOf(sharedPrefs.getString("lastAgentConversationId", null)) }
+
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val agentEventsByMessage = remember { mutableStateMapOf<String, List<AgentEvent>>() }
-    val messages = remember { mutableStateListOf<ChatMessage>() }
-    var contextSummary by remember { androidx.compose.runtime.mutableStateOf<ChatContextSummary?>(null) }
+    
+    val activeSessions = remember { mutableStateMapOf<String, ChatSession>() }
+    val activeJobs = remember { mutableStateMapOf<String, kotlinx.coroutines.Job>() }
+    var selectedMode by rememberSaveableMutableState(ChatMode.Chat)
+    var input by rememberSaveableMutableState("")
     val selectedAttachments = remember { androidx.compose.runtime.mutableStateListOf<ChatAttachment>() }
+
+    val activeSession = remember(currentConversationId, selectedMode) {
+        val id = currentConversationId
+        if (id != null) {
+            activeSessions.getOrPut(id) {
+                val loadedDetail = historyManager.loadConversation(id)
+                if (loadedDetail != null) {
+                    val session = ChatSession(id, loadedDetail.selectedMode)
+                    session.messages.addAll(loadedDetail.messages)
+                    loadedDetail.agentEvents.forEach { (k, v) -> session.agentEventsByMessage[k] = v }
+                    session.contextSummary = loadedDetail.contextSummary
+                    session
+                } else {
+                    ChatSession(id, selectedMode)
+                }
+            }
+        } else {
+            ChatSession("new", selectedMode)
+        }
+    }
+
+    val messages = activeSession.messages
+    val agentEventsByMessage = activeSession.agentEventsByMessage
+
+
+    val isSending = currentConversationId != null && activeJobs[currentConversationId] != null
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -194,11 +234,6 @@ fun ChatRoute(
         }
     }
 
-    var input by rememberSaveableMutableState("")
-    var selectedMode by rememberSaveableMutableState(ChatMode.Chat)
-    var isSending by rememberSaveableMutableState(false)
-    var currentJob by remember { androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.Job?>(null) }
-
     var shouldAutoScroll by remember { androidx.compose.runtime.mutableStateOf(true) }
     // Track whether the user's finger is physically touching the list.
     var userIsTouching by remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -233,35 +268,53 @@ fun ChatRoute(
     }
 
     fun stopGeneration() {
-        currentJob?.cancel()
-        currentJob = null
-        isSending = false
-        val lastAssistantMessage = messages.lastOrNull { it.role == MessageRole.Assistant }
+        val targetId = currentConversationId ?: return
+        activeJobs[targetId]?.cancel()
+        activeJobs.remove(targetId)
+        val targetSession = activeSessions[targetId] ?: return
+        
+        val lastAssistantMessage = targetSession.messages.lastOrNull { it.role == MessageRole.Assistant }
         if (lastAssistantMessage != null && lastAssistantMessage.status == MessageStatus.Streaming) {
-            messages.updateMessage(lastAssistantMessage.id) { message ->
+            targetSession.messages.updateMessage(lastAssistantMessage.id) { message ->
                 message.copy(
                     content = message.content.ifBlank { "已停止生成。" },
                     status = MessageStatus.Complete,
                 )
             }
         }
-        val savedId = historyManager.saveConversation(
-            currentConversationId,
-            selectedMode,
-            messages.toList(),
-            agentEventsByMessage.toMap(),
-            contextSummary,
+        historyManager.saveConversation(
+            targetSession.id,
+            targetSession.mode,
+            targetSession.messages.toList(),
+            targetSession.agentEventsByMessage.toMap(),
+            targetSession.contextSummary,
         )
-        currentConversationId = savedId
+    }
+
+    fun switchMode(newMode: ChatMode) {
+        if (selectedMode == newMode) return
+        
+        if (currentConversationId != null) {
+            if (selectedMode == ChatMode.Chat) {
+                lastChatConversationId = currentConversationId
+                sharedPrefs.edit().putString("lastChatConversationId", currentConversationId).apply()
+            } else {
+                lastAgentConversationId = currentConversationId
+                sharedPrefs.edit().putString("lastAgentConversationId", currentConversationId).apply()
+            }
+        }
+        
+        selectedMode = newMode
+        val targetId = if (newMode == ChatMode.Chat) lastChatConversationId else lastAgentConversationId
+        
+        if (targetId != null && historyManager.loadConversation(targetId) != null) {
+            currentConversationId = targetId
+        } else {
+            currentConversationId = null
+        }
     }
 
     fun resetConversation() {
-        currentJob?.cancel()
-        currentJob = null
-        isSending = false
-        messages.clear()
-        agentEventsByMessage.clear()
-        contextSummary = null
         currentConversationId = null
     }
 
@@ -282,15 +335,22 @@ fun ChatRoute(
         val finalContent = builder.toString()
         val imageUrls = selectedAttachments.filter { it.isImage }.mapNotNull { it.base64Data }
 
-        messages += ChatMessage(
-            id = "user-${messages.size}",
+        val targetId = currentConversationId ?: java.util.UUID.randomUUID().toString()
+        if (currentConversationId == null) {
+            currentConversationId = targetId
+            activeSessions[targetId] = ChatSession(targetId, selectedMode)
+        }
+        val targetSession = activeSessions[targetId]!!
+
+        targetSession.messages += ChatMessage(
+            id = "user-${targetSession.messages.size}",
             role = MessageRole.User,
             content = finalContent,
             imageUrls = imageUrls,
             attachments = selectedAttachments.toList(),
         )
-        val assistantId = "assistant-${messages.size}"
-        messages += ChatMessage(
+        val assistantId = "assistant-${targetSession.messages.size}"
+        targetSession.messages += ChatMessage(
             id = assistantId,
             role = MessageRole.Assistant,
             content = "",
@@ -298,31 +358,29 @@ fun ChatRoute(
         )
         input = ""
         selectedAttachments.clear()
-        isSending = true
 
-        val savedId = historyManager.saveConversation(
-            currentConversationId,
-            selectedMode,
-            messages.toList(),
-            agentEventsByMessage.toMap(),
-            contextSummary,
+        historyManager.saveConversation(
+            targetSession.id,
+            targetSession.mode,
+            targetSession.messages.toList(),
+            targetSession.agentEventsByMessage.toMap(),
+            targetSession.contextSummary,
         )
-        currentConversationId = savedId
 
-        currentJob = scope.launch {
-            val result = if (selectedMode == ChatMode.Chat) {
+        val job = scope.launch {
+            val result = if (targetSession.mode == ChatMode.Chat) {
                 onSendMessage(
-                    messages.toList(),
+                    targetSession.messages.toList(),
                     useWebSearch,
-                    contextSummary,
-                    { summary -> contextSummary = summary },
+                    targetSession.contextSummary,
+                    { summary -> targetSession.contextSummary = summary },
                     { delta ->
-                        messages.updateMessage(assistantId) { message ->
+                        targetSession.messages.updateMessage(assistantId) { message ->
                             message.copy(content = message.content + delta)
                         }
                     },
                     { toolDelta ->
-                        messages.updateMessage(assistantId) { message ->
+                        targetSession.messages.updateMessage(assistantId) { message ->
                             message.copy(toolCalls = message.toolCalls.merge(toolDelta))
                         }
                     },
@@ -330,27 +388,27 @@ fun ChatRoute(
             } else {
                 onRunAgent(
                     finalContent,
-                    messages.toList(),
+                    targetSession.messages.toList(),
                     useWebSearch,
-                    contextSummary,
-                    { summary -> contextSummary = summary },
+                    targetSession.contextSummary,
+                    { summary -> targetSession.contextSummary = summary },
                     { event ->
-                        agentEventsByMessage[assistantId] = agentEventsByMessage[assistantId].orEmpty() + event
+                        targetSession.agentEventsByMessage[assistantId] = targetSession.agentEventsByMessage[assistantId].orEmpty() + event
                     },
                     { delta ->
-                        messages.updateMessage(assistantId) { message ->
+                        targetSession.messages.updateMessage(assistantId) { message ->
                             message.copy(content = message.content + delta)
                         }
                     },
                     { toolDelta ->
-                        messages.updateMessage(assistantId) { message ->
+                        targetSession.messages.updateMessage(assistantId) { message ->
                             message.copy(toolCalls = message.toolCalls.merge(toolDelta))
                         }
                     },
                 )
             }
 
-            messages.updateMessage(assistantId) { message ->
+            targetSession.messages.updateMessage(assistantId) { message ->
                 result.fold(
                     onSuccess = {
                         message.copy(
@@ -373,60 +431,59 @@ fun ChatRoute(
                     },
                 )
             }
-            isSending = false
-            currentJob = null
+            activeJobs.remove(targetId)
 
-            val finalSavedId = historyManager.saveConversation(
-                currentConversationId,
-                selectedMode,
-                messages.toList(),
-                agentEventsByMessage.toMap(),
-                contextSummary,
+            historyManager.saveConversation(
+                targetSession.id,
+                targetSession.mode,
+                targetSession.messages.toList(),
+                targetSession.agentEventsByMessage.toMap(),
+                targetSession.contextSummary,
             )
-            currentConversationId = finalSavedId
         }
+        activeJobs[targetId] = job
     }
 
     fun regenerateMessage(assistantMessageId: String) {
-        val index = messages.indexOfFirst { it.id == assistantMessageId }
+        val targetId = currentConversationId ?: return
+        val targetSession = activeSessions[targetId] ?: return
+        val index = targetSession.messages.indexOfFirst { it.id == assistantMessageId }
         if (index == -1 || isSending) return
 
-        val previousUserMessage = messages.subList(0, index).lastOrNull { it.role == MessageRole.User } ?: return
+        val previousUserMessage = targetSession.messages.subList(0, index).lastOrNull { it.role == MessageRole.User } ?: return
 
-        messages.removeRange(index, messages.size)
+        targetSession.messages.removeRange(index, targetSession.messages.size)
 
         val newAssistantId = "assistant-${System.currentTimeMillis()}"
-        messages += ChatMessage(
+        targetSession.messages += ChatMessage(
             id = newAssistantId,
             role = MessageRole.Assistant,
             content = "",
             status = MessageStatus.Streaming,
         )
-        isSending = true
 
-        val savedId = historyManager.saveConversation(
-            currentConversationId,
-            selectedMode,
-            messages.toList(),
-            agentEventsByMessage.toMap(),
-            contextSummary,
+        historyManager.saveConversation(
+            targetSession.id,
+            targetSession.mode,
+            targetSession.messages.toList(),
+            targetSession.agentEventsByMessage.toMap(),
+            targetSession.contextSummary,
         )
-        currentConversationId = savedId
 
-        currentJob = scope.launch {
-            val result = if (selectedMode == ChatMode.Chat) {
+        val job = scope.launch {
+            val result = if (targetSession.mode == ChatMode.Chat) {
                 onSendMessage(
-                    messages.toList(),
+                    targetSession.messages.toList(),
                     useWebSearch,
-                    contextSummary,
-                    { summary -> contextSummary = summary },
+                    targetSession.contextSummary,
+                    { summary -> targetSession.contextSummary = summary },
                     { delta ->
-                        messages.updateMessage(newAssistantId) { message ->
+                        targetSession.messages.updateMessage(newAssistantId) { message ->
                             message.copy(content = message.content + delta)
                         }
                     },
                     { toolDelta ->
-                        messages.updateMessage(newAssistantId) { message ->
+                        targetSession.messages.updateMessage(newAssistantId) { message ->
                             message.copy(toolCalls = message.toolCalls.merge(toolDelta))
                         }
                     },
@@ -434,27 +491,27 @@ fun ChatRoute(
             } else {
                 onRunAgent(
                     previousUserMessage.content,
-                    messages.toList(),
+                    targetSession.messages.toList(),
                     useWebSearch,
-                    contextSummary,
-                    { summary -> contextSummary = summary },
+                    targetSession.contextSummary,
+                    { summary -> targetSession.contextSummary = summary },
                     { event ->
-                        agentEventsByMessage[newAssistantId] = agentEventsByMessage[newAssistantId].orEmpty() + event
+                        targetSession.agentEventsByMessage[newAssistantId] = targetSession.agentEventsByMessage[newAssistantId].orEmpty() + event
                     },
                     { delta ->
-                        messages.updateMessage(newAssistantId) { message ->
+                        targetSession.messages.updateMessage(newAssistantId) { message ->
                             message.copy(content = message.content + delta)
                         }
                     },
                     { toolDelta ->
-                        messages.updateMessage(newAssistantId) { message ->
+                        targetSession.messages.updateMessage(newAssistantId) { message ->
                             message.copy(toolCalls = message.toolCalls.merge(toolDelta))
                         }
                     },
                 )
             }
 
-            messages.updateMessage(newAssistantId) { message ->
+            targetSession.messages.updateMessage(newAssistantId) { message ->
                 result.fold(
                     onSuccess = {
                         message.copy(
@@ -477,18 +534,17 @@ fun ChatRoute(
                     }
                 )
             }
-            isSending = false
-            currentJob = null
+            activeJobs.remove(targetId)
 
-            val finalSavedId = historyManager.saveConversation(
-                currentConversationId,
-                selectedMode,
-                messages.toList(),
-                agentEventsByMessage.toMap(),
-                contextSummary,
+            historyManager.saveConversation(
+                targetSession.id,
+                targetSession.mode,
+                targetSession.messages.toList(),
+                targetSession.agentEventsByMessage.toMap(),
+                targetSession.contextSummary,
             )
-            currentConversationId = finalSavedId
         }
+        activeJobs[targetId] = job
     }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -653,10 +709,7 @@ fun ChatRoute(
                     onInputChange = { input = it },
                     selectedMode = selectedMode,
                     onModeSelected = { 
-                        if (messages.isNotEmpty()) {
-                            resetConversation()
-                        }
-                        selectedMode = it 
+                        switchMode(it)
                     },
                     useWebSearch = useWebSearch,
                     onUseWebSearchChange = { enabled ->
@@ -743,12 +796,20 @@ fun ChatRoute(
                 showHistoryDialog = false
                 val detail = historyManager.loadConversation(summary.id)
                 if (detail != null) {
-                    messages.clear()
-                    messages.addAll(detail.messages)
-                    agentEventsByMessage.clear()
-                    agentEventsByMessage.putAll(detail.agentEvents)
-                    contextSummary = detail.contextSummary
+                    val session = ChatSession(detail.id, detail.selectedMode)
+                    session.messages.addAll(detail.messages)
+                    detail.agentEvents.forEach { (k, v) -> session.agentEventsByMessage[k] = v }
+                    session.contextSummary = detail.contextSummary
+                    activeSessions[detail.id] = session
+                    
                     selectedMode = detail.selectedMode
+                    if (selectedMode == ChatMode.Chat) {
+                        lastChatConversationId = detail.id
+                        sharedPrefs.edit().putString("lastChatConversationId", detail.id).apply()
+                    } else {
+                        lastAgentConversationId = detail.id
+                        sharedPrefs.edit().putString("lastAgentConversationId", detail.id).apply()
+                    }
                     currentConversationId = detail.id
                     shouldAutoScroll = true
                 }
@@ -757,8 +818,15 @@ fun ChatRoute(
                 historyManager.deleteConversation(summary.id)
                 historySummaries = historyManager.getSummaries()
                 if (currentConversationId == summary.id) {
-                    resetConversation()
                     currentConversationId = null
+                }
+                if (lastChatConversationId == summary.id) {
+                    lastChatConversationId = null
+                    sharedPrefs.edit().remove("lastChatConversationId").apply()
+                }
+                if (lastAgentConversationId == summary.id) {
+                    lastAgentConversationId = null
+                    sharedPrefs.edit().remove("lastAgentConversationId").apply()
                 }
             }
         )
